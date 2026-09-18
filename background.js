@@ -27,9 +27,18 @@ const YTDLP_HOST = 'com.tacosandtypescript.xvd';
 function mensajeDeErrorNativo(error) {
   const texto = String((error && error.message) || error || '');
   if (/not found|not registered|forbidden|not installed/i.test(texto)) {
+    const id = (() => {
+      try {
+        return chrome.runtime.id;
+      } catch (_) {
+        return '';
+      }
+    })();
     return (
-      'El servicio de yt-dlp no está instalado. Ejecuta una vez «Instalar yt-dlp para X media.cmd» ' +
-      '(el que está en el Escritorio) y vuelve a intentarlo.'
+      'El servicio de yt-dlp no está instalado (o esta copia de la extensión no está autorizada). ' +
+      'Ejecuta «Instalar yt-dlp para X media.cmd»' +
+      (id ? ', y si sigue igual, ábrelo con: Instalar yt-dlp para X media.cmd -IdExtension ' + id : '') +
+      '.'
     );
   }
   return texto || 'Error desconocido del servicio de yt-dlp.';

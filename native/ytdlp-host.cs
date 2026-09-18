@@ -444,6 +444,8 @@ internal static class Programa
             return "YouTube rechazó la descarga (HTTP 403). Casi siempre es que yt-dlp está desactualizado: pulsa «Actualizar yt-dlp» en el popup.";
         if (Regex.IsMatch(t, @"Sign in to confirm|not a bot", RegexOptions.IgnoreCase))
             return "YouTube pide iniciar sesión para comprobar que no eres un robot. Activa «Usar las cookies de Chrome» en el popup y reinténtalo.";
+        if (Regex.IsMatch(t, @"Could not copy Chrome cookie database|could not find .* cookies database|failed to decrypt", RegexOptions.IgnoreCase))
+            return "Chrome tiene la base de datos de cookies bloqueada mientras está abierto. Cierra Chrome por completo y vuelve a intentarlo, o desactiva «Usar las cookies de Chrome».";
         if (Regex.IsMatch(t, @"Private video|video is private", RegexOptions.IgnoreCase))
             return "El vídeo es privado.";
         if (Regex.IsMatch(t, @"members-only|Join this channel", RegexOptions.IgnoreCase))

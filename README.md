@@ -723,7 +723,8 @@ segundos por combinación de imagen + resolución + formato.
 | La descarga se corta a mitad | La extensión reintenta con la siguiente calidad o resolución. Revisa la conexión. |
 | YouTube: «El servicio de yt-dlp no está instalado» | Ejecuta una vez `Instalar yt-dlp para X media.cmd` y recarga la extensión (↻ en `chrome://extensions/`). |
 | YouTube: «HTTP 403» al descargar | yt-dlp desactualizado. Popup → **General** → «Actualizar yt-dlp». |
-| YouTube: «pide iniciar sesión para comprobar que no eres un robot» | Activa **«YouTube: usar las cookies de Chrome»** en el popup y reinténtalo. |
+| YouTube: «pide iniciar sesión para comprobar que no eres un robot» | Activa **«YouTube: usar las cookies de Chrome»** en el popup. Aviso: Chrome bloquea su base de datos de cookies mientras está abierto, así que esta opción solo funciona si Chrome está cerrado; si falla, el aviso lo dice con esas palabras. |
+| YouTube: «Could not copy Chrome cookie database» | Es lo anterior: Chrome está abierto y bloquea el archivo de cookies. Cierra Chrome por completo (o desactiva la opción) y reinténtalo. |
 | YouTube: el MP3 o el vídeo unido fallan | Falta **ffmpeg**. Se instala con `winget install Gyan.FFmpeg` (el popup lo indica). |
 | YouTube: «no se encuentra yt-dlp» tras instalarlo | El instalador lo dice también: usa `winget install yt-dlp.yt-dlp` y vuelve a ejecutarlo. |
 | YouTube: la descarga tarda mucho | Un 4K con audio ronda los 200 MB. Baja la calidad en el popup (pestaña **Videos** → calidad mínima) o usa M4A para solo audio. |

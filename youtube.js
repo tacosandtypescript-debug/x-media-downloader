@@ -243,7 +243,7 @@
         throw Object.assign(
           new Error(
             'yt-dlp no está disponible todavía. Ejecuta una vez «Instalar yt-dlp para X media.cmd» ' +
-              '(está en el Escritorio) y volverá a funcionar sin reiniciar Chrome.'
+              '(está en el Escritorio) y vuelve a intentarlo: no hace falta reiniciar Chrome.'
           ),
           { codigo: 'sin_ytdlp' }
         );
