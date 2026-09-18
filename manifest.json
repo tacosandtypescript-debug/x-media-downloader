@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Descargador de medios para X",
-  "version": "2.5.0",
+  "version": "2.6.0",
   "description": "Añade un botón flotante \"Descargar\" sobre los videos e imágenes de X (Twitter), Instagram y Facebook para guardarlos en la máxima calidad, con opción de solo audio (M4A/MP3).",
   "minimum_chrome_version": "116",
   "icons": {

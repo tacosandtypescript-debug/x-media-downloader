@@ -39,7 +39,7 @@
   const TOASTS_ID = 'xvd-toasts';
 
   /** Versión del núcleo (se muestra en el diagnóstico del popup). */
-  const coreVersion = '2.5.0';
+  const coreVersion = '2.6.0';
 
   const DEFAULT_SETTINGS = {
     /* --- General --- */
@@ -69,7 +69,9 @@
     instagramEnabled: true,        // botones también en Instagram
     instagramFilenameTemplate: 'instagram_{usuario}_{id}_{indice}',
     facebookEnabled: true,         // botones también en Facebook
-    facebookFilenameTemplate: 'facebook_{usuario}_{id}_{indice}'
+    facebookFilenameTemplate: 'facebook_{usuario}_{id}_{indice}',
+    /* --- Organización --- */
+    folderHistory: []              // carpetas recordadas para elegirlas en el popup
   };
 
   const QUALITY_ORDER = [2160, 1440, 1080, 720, 480, 360];
@@ -1297,12 +1299,26 @@
     return context;
   }
 
+  /**
+   * Limpia la carpeta de destino dejándola como ruta relativa dentro de
+   * Descargas. Nunca deja salir de ahí (nada de "..") y aplica las reglas de
+   * Windows: sin caracteres inválidos ni puntos/espacios al final de un segmento.
+   */
   function sanitizeFolder(folder) {
     return String(folder || '')
-      .split(/[\\/]+/)
-      .map((part) => part.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').replace(/^\.+$/, '').trim())
+      .replace(/\\/g, '/')
+      .split('/')
+      .map((part) =>
+        part
+          .replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .replace(/[. ]+$/g, '')
+      )
       .filter((part) => part && part !== '.' && part !== '..')
-      .join('/');
+      .join('/')
+      .slice(0, 120)
+      .replace(/[.\s/]+$/g, '');
   }
 
   function buildFilename(media, variant, context, suffix, config) {

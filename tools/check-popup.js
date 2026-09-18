@@ -124,4 +124,11 @@ if (panelsWithoutHidden.length) {
   console.log('✓ Paneles de pestañas: solo "Videos" visible al abrir el popup');
 }
 
+// El popup necesita folders.js cargado ANTES que popup.js.
+const posFolders = html.indexOf('folders.js');
+const posPopup = html.indexOf('popup.js');
+const ordenOk = posFolders !== -1 && posFolders < posPopup;
+ok = ok && ordenOk;
+console.log((ordenOk ? '✓ ' : '✗ ') + 'folders.js se carga antes que popup.js');
+
 process.exitCode = ok ? 0 : 1;

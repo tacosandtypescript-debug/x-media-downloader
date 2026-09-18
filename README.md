@@ -89,10 +89,50 @@ si algo falla, popup → **General** → **Copiar informe** y me lo pasas.
 - **Botones flotantes** con el estilo visual de X, que no bloquean ni modifican los controles
   nativos ni la reproducción, y **no interfieren con el lightbox** (en el visor ampliado el botón
   se desplaza a la esquina inferior derecha para no tapar los controles de X).
-- **Carpeta de destino** configurable dentro de *Descargas* y opción de preguntar cada vez.
-- **Plantillas de nombre de archivo** independientes para videos, imágenes e Instagram.
-- **Interruptor on/off** general y otro específico para las imágenes.
+- **Organización por carpetas**: elige o crea la carpeta de destino desde el popup y todo lo que
+  descargues se guarda ahí. Ver «Organización por carpetas» más abajo.
+- **Plantillas de nombre de archivo** independientes para X (vídeo e imagen), Instagram y Facebook.
+- **Interruptor on/off** general y otros por sitio (imágenes, Instagram, Facebook).
 - **Avisos en español** dentro de la propia página: progreso, éxito y errores claros.
+
+---
+
+## Organización por carpetas
+
+En el popup, pestaña **General**, la primera tarjeta es **«Carpeta de destino»**:
+
+```
+📁 Descargas/IRONMOUSE Torneo          ← dónde se guardará todo, siempre visible
+Carpeta nueva (se crea al descargar):  [ IRONMOUSE Torneo ]
+[ Crear carpeta ]   [ Usar la predeterminada ]
+Se creará: Descargas/IRONMOUSE Torneo
+```
+
+- **Campo para escribir el nombre** de una carpeta nueva. Permite anidar con `/`:
+  `Extension/Fortnite`.
+- **Lista de carpetas ya usadas**: el campo es un desplegable, así que puedes elegir una anterior; al
+  seleccionarla se aplica sola.
+- **Botón «Crear carpeta»** que la registra y la deja como destino de las descargas.
+- **El destino actual se ve siempre** arriba, con la ruta completa dentro de Descargas.
+- **«Usar la predeterminada»** vuelve a `Descargas` sin subcarpeta.
+- **Se recuerda** la última carpeta (en `chrome.storage.sync`, así que sobrevive al cierre del
+  navegador) y puedes cambiarla cuando quieras.
+- **Sirve para todo**: vídeo, imágenes, carruseles y audio, en X, Instagram y Facebook.
+- **Sin duplicados**: `Fortnite`, `fortnite ` y `FORTNITE` son la misma carpeta: se reutiliza la que
+  ya existe y se avisa en lugar de crear otra.
+- **Nombre saneado**: los caracteres que Windows y Chrome no admiten (`\ / : * ? " < > |`) pasan a
+  `_`, se quitan puntos y espacios finales y **nunca se puede salir de Descargas**
+  (`../../etc/passwd` → `etc/passwd`).
+- **La carpeta se crea sola**, sin permisos de escritura ni carpetas a mano: Chrome crea la
+  subcarpeta la primera vez que descarga, porque la ruta viaja en la propiedad `filename`:
+
+  ```js
+  chrome.downloads.download({ url, filename: 'IRONMOUSE Torneo/imagen_01.jpg' });
+  chrome.downloads.download({ url, filename: 'IRONMOUSE Torneo/video_01.mp4'  });
+  ```
+
+  Es la forma que documenta Chrome: rutas **relativas** dentro de la carpeta de Descargas permitida
+  por el navegador. La extensión nunca pide acceso al sistema de archivos.
 
 ### Instagram
 

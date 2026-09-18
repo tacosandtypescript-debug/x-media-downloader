@@ -95,7 +95,8 @@ const DEFAULT_SETTINGS = {
   instagramEnabled: true,
   instagramFilenameTemplate: 'instagram_{usuario}_{id}_{indice}',
   facebookEnabled: true,
-  facebookFilenameTemplate: 'facebook_{usuario}_{id}_{indice}'
+  facebookFilenameTemplate: 'facebook_{usuario}_{id}_{indice}',
+  folderHistory: []
 };
 
 /** downloadId -> { tabId, filename, url }. Caché en memoria + respaldo en sesión. */

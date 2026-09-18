@@ -1125,6 +1125,91 @@ test('el saneado de Facebook filtra hosts y respeta las firmas', () => {
   assert.strictEqual(fbBridge.api.sanitizeFacebook({ candidatos: [{ url: 'https://evil.example.com/x.mp4' }] }), null);
 });
 
+/* -------------------------------------------------------- carpetas destino -- */
+
+console.log('\nCarpetas de destino (folders.js)');
+
+function loadFoldersModule() {
+  const sandbox = { console, module: { exports: {} } };
+  sandbox.window = sandbox;
+  const code = fs.readFileSync(path.join(ROOT, 'folders.js'), 'utf8');
+  vm.createContext(sandbox);
+  vm.runInContext(code, sandbox, { filename: 'folders.js' });
+  return sandbox.module.exports;
+}
+
+const carp = loadFoldersModule();
+
+test('normaliza el nombre de una carpeta nueva', () => {
+  assert.strictEqual(carp.normalizarCarpeta('IRONMOUSE Torneo'), 'IRONMOUSE Torneo');
+  assert.strictEqual(carp.normalizarCarpeta('  Fortnite   Skins  '), 'Fortnite Skins');
+  assert.strictEqual(carp.normalizarCarpeta('Extension/Fortnite'), 'Extension/Fortnite');
+  assert.strictEqual(carp.normalizarCarpeta('Extension\\Fortnite'), 'Extension/Fortnite');
+});
+
+test('sustituye caracteres invalidos en vez de fallar', () => {
+  assert.strictEqual(carp.normalizarCarpeta('IRONMOUSE: Torneo?'), 'IRONMOUSE_ Torneo_');
+  assert.strictEqual(carp.normalizarCarpeta('a*b|c"d<e>f'), 'a_b_c_d_e_f');
+  assert.ok(!/[\\/:*?"<>|]/.test(carp.normalizarCarpeta('x:y*z?')),
+    'no debe quedar ningún carácter inválido');
+});
+
+test('nunca permite salir de la carpeta de Descargas', () => {
+  assert.strictEqual(carp.normalizarCarpeta('../../etc/passwd'), 'etc/passwd');
+  assert.strictEqual(carp.normalizarCarpeta('X Videos/../secretos'), 'X Videos/secretos');
+  assert.strictEqual(carp.normalizarCarpeta('..'), '');
+  assert.strictEqual(carp.normalizarCarpeta('/'), '');
+  assert.strictEqual(carp.normalizarCarpeta('...'), '');
+});
+
+test('aplica las reglas de Windows (sin punto ni espacio al final)', () => {
+  assert.strictEqual(carp.normalizarCarpeta('carpeta.'), 'carpeta');
+  assert.strictEqual(carp.normalizarCarpeta('carpeta '), 'carpeta');
+  assert.strictEqual(carp.normalizarCarpeta('Fortnite/Skins. '), 'Fortnite/Skins');
+});
+
+test('la etiqueta muestra la ruta completa dentro de Descargas', () => {
+  assert.strictEqual(carp.etiquetaDestino('IRONMOUSE Torneo'), 'Descargas/IRONMOUSE Torneo');
+  assert.strictEqual(carp.etiquetaDestino(''), 'Descargas (predeterminada)');
+  assert.strictEqual(carp.etiquetaDestino('../fuera'), 'Descargas/fuera');
+});
+
+test('evita duplicados al anadir al historial', () => {
+  let estado = carp.anadirAlHistorial([], 'Fortnite');
+  assert.strictEqual(estado.carpeta, 'Fortnite');
+  assert.strictEqual(estado.existia, false);
+  assert.strictEqual(estado.historial.length, 1);
+
+  // Misma carpeta con otra caja, espacios o barras: NO se duplica.
+  estado = carp.anadirAlHistorial(estado.historial, '  fortnite  ');
+  assert.strictEqual(estado.existia, true);
+  assert.strictEqual(estado.historial.length, 1, 'no debe crear una carpeta duplicada');
+  assert.strictEqual(estado.carpeta, 'Fortnite', 'conserva el nombre original');
+
+  estado = carp.anadirAlHistorial(estado.historial, 'Extension/Fortnite');
+  assert.strictEqual(estado.historial.length, 2);
+  assert.strictEqual(estado.historial[0], 'Extension/Fortnite', 'la última usada va primera');
+});
+
+test('no anade nada si el nombre queda vacio', () => {
+  const estado = carp.anadirAlHistorial(['Fortnite'], '   ');
+  assert.strictEqual(estado.carpeta, '');
+  assert.strictEqual(estado.historial.length, 1);
+  assert.strictEqual(carp.normalizarCarpeta('   '), '');
+});
+
+test('se puede quitar una carpeta del historial', () => {
+  const lista = carp.quitarDelHistorial(['A', 'B', 'C'], ' b ');
+  assert.deepStrictEqual(Array.from(lista), ['A', 'C']);
+});
+
+test('el historial no crece sin limite', () => {
+  let historial = [];
+  for (let i = 0; i < 60; i++) historial = carp.anadirAlHistorial(historial, 'carpeta-' + i).historial;
+  assert.ok(historial.length <= carp.MAXIMO_HISTORIAL, 'longitud: ' + historial.length);
+  assert.strictEqual(historial[0], 'carpeta-59', 'la última usada es la primera');
+});
+
 /* ------------------------------------------------------------------ cierre -- */
 
 console.log('\n' + passed + ' pruebas correctas, ' + failures.length + ' fallos\n');

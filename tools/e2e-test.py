@@ -928,12 +928,93 @@ with sync_playwright() as p:
 
     fb.screenshot(path=str(SHOTS / "facebook.png"), full_page=True)
 
+    # ================================================== 8. CARPETA DE DESTINO
+    print("\n8. CARPETA DE DESTINO (organización por carpetas)")
+
+    def descargar_en_carpeta(carpeta):
+        popup.evaluate(
+            "c => new Promise(r => chrome.storage.sync.set({folder: c, format: 'mp4'}, r))", carpeta
+        )
+        page.reload(wait_until="domcontentloaded")
+        page.wait_for_selector(SEL_VIDEO, timeout=20000)
+        esperar(page, 1.5)
+        antes = {d.get("id") for d in descargas_de(popup, "")}
+        page.locator(SEL_VIDEO).first.click()
+        esperar(page, 8.0)
+        return [d for d in descargas_de(popup, "") if d.get("id") not in antes]
+
+    descargar_en_carpeta("IRONMOUSE Torneo")
+    pedidos = archivos_pedidos(popup, "IRONMOUSE Torneo")
+    check("la descarga se guarda en la carpeta elegida (ruta relativa a Descargas)",
+          any(n.startswith("IRONMOUSE Torneo/") for n in pedidos), pedidos[-1:] or "sin registro")
+    check("el vídeo y la imagen comparten la misma carpeta",
+          all("/" in n for n in pedidos), pedidos[:3])
+
+    # Un nombre con caracteres imposibles se sanea también al construir la ruta.
+    descargar_en_carpeta("Prueba: ¿carpeta?")
+    pedidos2 = archivos_pedidos(popup, "Prueba")
+    check("los caracteres inválidos de la carpeta se sanean en la ruta",
+          bool(pedidos2) and all(":" not in n for n in pedidos2), pedidos2[-1:] or "sin registro")
+
     volcar_diagnostico(popup, "DIAGNÓSTICO FINAL", sw)
     page.screenshot(path=str(SHOTS / "pagina.png"), full_page=True)
-    # Captura del popup con el registro de diagnóstico ya relleno.
+
+    # --- flujo real de la interfaz de carpetas ------------------------------
+    popup.reload(wait_until="domcontentloaded")
+    popup.wait_for_timeout(500)
     popup.locator("#tab-general").click()
-    esperar(page, 1.0)
+    popup.wait_for_timeout(300)
+
+    popup.fill("#carpetaNueva", "Fortnite/Clips 2026")
+    popup.click("#crearCarpeta")
+    popup.wait_for_timeout(700)
+    destino = popup.locator("#destinoTexto").inner_text()
+    check("escribir y crear la carpeta actualiza el destino",
+          destino == "Descargas/Fortnite/Clips 2026", destino)
+
+    guardado = popup.evaluate(
+        "() => new Promise(r => chrome.storage.sync.get({folder: null, folderHistory: []}, r))"
+    )
+    check("la carpeta queda como destino y en la lista de recordadas",
+          guardado.get("folder") == "Fortnite/Clips 2026"
+          and "Fortnite/Clips 2026" in guardado.get("folderHistory", []),
+          f"{guardado.get('folder')} · {guardado.get('folderHistory')}")
+
+    # Crear la misma con otras mayúsculas y espacios de más NO debe duplicarla.
+    popup.fill("#carpetaNueva", "  fortnite/clips 2026  ")
+    popup.click("#crearCarpeta")
+    popup.wait_for_timeout(700)
+    historial = popup.evaluate(
+        "() => new Promise(r => chrome.storage.sync.get({folderHistory: []}, r))"
+    ).get("folderHistory", [])
+    repetidas = [h for h in historial if "fortnite" in str(h).lower()]
+    check("no se duplica la carpeta al crearla con otra caja o espacios",
+          len(repetidas) == 1 and len(historial) == len({str(h).lower() for h in historial}),
+          historial)
+
+    popup.click("#carpetaPredeterminada")
+    popup.wait_for_timeout(600)
+    check("se puede volver a la carpeta predeterminada",
+          "predeterminada" in popup.locator("#destinoTexto").inner_text(),
+          popup.locator("#destinoTexto").inner_text())
+
+    # Se deja una carpeta puesta para la captura y se comprueba el aviso previo.
+    popup.fill("#carpetaNueva", "IRONMOUSE Torneo")
+    popup.click("#crearCarpeta")
+    popup.wait_for_timeout(600)
+    popup.fill("#carpetaNueva", "Prueba: ¿carpeta?")
+    popup.wait_for_timeout(300)
+    previa = popup.locator("#carpetaPrevia").inner_text()
+    check("avisa de cómo quedará el nombre antes de crearla",
+          "Descargas/Prueba_ ¿carpeta_" in previa, previa)
+    popup.fill("#carpetaNueva", "")
+    popup.wait_for_timeout(200)
+
     popup.screenshot(path=str(SHOTS / "popup-general.png"), full_page=True)
+    tarjeta_carpeta = popup.locator("xpath=//div[contains(@class,'xvd-card')][.//p[@id='destinoActual']]")
+    tarjeta_carpeta.scroll_into_view_if_needed()
+    tarjeta_carpeta.screenshot(path=str(SHOTS / "carpeta-destino.png"))
+
     tarjeta = popup.locator("xpath=//div[contains(@class,'xvd-card')][.//pre[@id='diagLog']]")
     tarjeta.scroll_into_view_if_needed()
     tarjeta.screenshot(path=str(SHOTS / "popup-diagnostico.png"))

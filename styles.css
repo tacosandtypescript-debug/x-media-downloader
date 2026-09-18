@@ -743,6 +743,36 @@ html.xvd-hover-only .xvd-button[data-state="loading"] {
   margin-bottom: 10px;
 }
 
+/* ---- Carpeta de destino ---- */
+
+.xvd-destino {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px dashed var(--xvd-border);
+  background: var(--xvd-surface-2);
+  color: var(--xvd-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.35;
+  word-break: break-all;
+  min-height: 40px;
+}
+
+.xvd-destino--personalizada {
+  border-style: solid;
+  border-color: var(--xvd-accent);
+  background: var(--xvd-accent-soft);
+}
+
+.xvd-destino__icono {
+  flex: 0 0 auto;
+  font-size: 15px;
+}
+
 /* ---- Registro de diagnóstico ---- */
 
 .xvd-log {

@@ -316,16 +316,46 @@
         </div>
 
         <div class="xvd-card">
-          <h2>Carpeta de descarga</h2>
-          <label class="xvd-field" for="folder">
-            <span class="xvd-field__label">Subcarpeta dentro de Descargas</span>
-            <input type="text" id="folder" placeholder="X Videos" autocomplete="off" spellcheck="false" />
+          <h2>Carpeta de destino</h2>
+          <p class="xvd-destino" id="destinoActual" title="Dónde se guardarán las descargas">
+            <span class="xvd-destino__icono" aria-hidden="true">📁</span>
+            <span id="destinoTexto">Descargas/X Videos</span>
+          </p>
+
+          <label class="xvd-field" for="carpetaNueva">
+            <span class="xvd-field__label">Carpeta nueva (se crea al descargar)</span>
+            <input
+              type="text"
+              id="carpetaNueva"
+              list="carpetasGuardadas"
+              placeholder="IRONMOUSE Torneo"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <datalist id="carpetasGuardadas"></datalist>
+            <small class="xvd-field__help" id="carpetaPrevia">
+              Escribe un nombre y pulsa «Crear carpeta». Puedes anidar con «/», por ejemplo
+              <code>Extension/Fortnite</code>.
+            </small>
           </label>
+
+          <div class="xvd-diag__actions">
+            <button type="button" id="crearCarpeta" class="xvd-btn">Crear carpeta</button>
+            <button type="button" id="carpetaPredeterminada" class="xvd-btn xvd-btn--ghost">
+              Usar la predeterminada
+            </button>
+          </div>
+
+          <p class="xvd-hint" id="carpetaEstado">
+            Todas las descargas (X, Instagram y Facebook; vídeo, imagen o audio) se guardan en la carpeta
+            elegida. Chrome la crea sola la primera vez que descargas.
+          </p>
+
           <label class="xvd-option xvd-option--check">
             <input type="checkbox" id="askWhereToSave" />
             <span>
               <strong>Preguntar dónde guardar cada vez</strong>
-              <small>Muestra el diálogo «Guardar como» de Chrome.</small>
+              <small>Muestra el diálogo «Guardar como» de Chrome (ignora la carpeta de arriba).</small>
             </span>
           </label>
         </div>
@@ -391,6 +421,7 @@
       <button type="button" id="openDownloads" class="xvd-btn">Abrir carpeta</button>
     </footer>
 
+    <script src="folders.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>

@@ -37,7 +37,8 @@ const DEFAULT_SETTINGS = {
   instagramEnabled: true,
   instagramFilenameTemplate: 'instagram_{usuario}_{id}_{indice}',
   facebookEnabled: true,
-  facebookFilenameTemplate: 'facebook_{usuario}_{id}_{indice}'
+  facebookFilenameTemplate: 'facebook_{usuario}_{id}_{indice}',
+  folderHistory: []
 };
 
 const FORMAT_HINTS = {
@@ -67,6 +68,13 @@ const LOG_KEY = 'xvd_log';
 const LOG_VISIBLE = 80;
 
 const elements = {};
+
+/**
+ * Carpetas de destino: la que está activa (ruta relativa dentro de Descargas) y
+ * la lista de las usadas antes, para poder elegirlas en el desplegable.
+ */
+let carpetaActual = '';
+let historialCarpetas = [];
 
 /** Última respuesta del content script y URL de la pestaña, para el informe. */
 let ultimoPing = null;
@@ -195,7 +203,8 @@ function setRadio(name, value) {
 function readForm() {
   return {
     enabled: elements.enabled.checked,
-    folder: elements.folder.value.trim(),
+    folder: carpetaActual,
+    folderHistory: historialCarpetas,
     askWhereToSave: elements.askWhereToSave.checked,
     showToasts: elements.showToasts.checked,
     showOnHover: elements.showOnHover.checked,
@@ -229,7 +238,9 @@ function readForm() {
 
 function fillForm(settings) {
   elements.enabled.checked = !!settings.enabled;
-  elements.folder.value = settings.folder || '';
+  carpetaActual = settings.folder || '';
+  historialCarpetas = Array.isArray(settings.folderHistory) ? settings.folderHistory : [];
+  renderCarpetas();
   elements.askWhereToSave.checked = !!settings.askWhereToSave;
   elements.showToasts.checked = !!settings.showToasts;
   elements.showOnHover.checked = !!settings.showOnHover;
@@ -358,6 +369,87 @@ async function renderDiagnostico() {
 }
 
 /* =======================================================================
+ * Carpetas de destino
+ *
+ * La carpeta se guarda como ruta RELATIVA dentro de Descargas, que es lo que
+ * acepta chrome.downloads: al pedir «IRONMOUSE Torneo/imagen_01.jpg» Chrome crea
+ * la subcarpeta sola. Aquí solo se normaliza, se recuerda y se evitan duplicados.
+ * ===================================================================== */
+
+function carpetas() {
+  return window.XVD_FOLDERS;
+}
+
+/** Pinta el destino actual y rellena la lista de carpetas recordadas. */
+function renderCarpetas() {
+  if (!elements.destinoTexto) return;
+  const api = carpetas();
+  if (!api) return;
+
+  elements.destinoTexto.textContent = api.etiquetaDestino(carpetaActual);
+  elements.destinoActual.classList.toggle(
+    'xvd-destino--personalizada',
+    !!api.normalizarCarpeta(carpetaActual)
+  );
+
+  if (elements.carpetasGuardadas) {
+    elements.carpetasGuardadas.innerHTML = '';
+    for (const carpeta of historialCarpetas) {
+      const opcion = document.createElement('option');
+      opcion.value = api.normalizarCarpeta(carpeta);
+      elements.carpetasGuardadas.appendChild(opcion);
+    }
+  }
+  pintarPreviaCarpeta();
+}
+
+/** Texto de ayuda bajo el campo: qué carpeta se creará o reutilizará. */
+function pintarPreviaCarpeta() {
+  if (!elements.carpetaPrevia || !elements.carpetaNueva) return;
+  const api = carpetas();
+  if (!api) return;
+
+  const escrita = api.normalizarCarpeta(elements.carpetaNueva.value);
+  if (!escrita) {
+    elements.carpetaPrevia.innerHTML =
+      'Escribe un nombre y pulsa «Crear carpeta». Puedes anidar con «/», por ejemplo <code>Extension/Fortnite</code>.';
+    return;
+  }
+
+  const existe = historialCarpetas.some((c) => api.claveDeCarpeta(c) === api.claveDeCarpeta(escrita));
+  elements.carpetaPrevia.textContent =
+    (existe ? 'Ya existe, se reutilizará: ' : 'Se creará: ') + api.etiquetaDestino(escrita);
+}
+
+/** Crea (o reutiliza) una carpeta y la deja como destino de las descargas. */
+function usarCarpeta(texto, opciones) {
+  const cfg = opciones || {};
+  const api = carpetas();
+  if (!api) return;
+
+  const resultado = api.anadirAlHistorial(historialCarpetas, texto);
+  if (!resultado.carpeta) {
+    status('Escribe antes un nombre de carpeta', 'error');
+    return;
+  }
+
+  historialCarpetas = resultado.historial;
+  carpetaActual = resultado.carpeta;
+  if (elements.carpetaNueva) elements.carpetaNueva.value = '';
+  renderCarpetas();
+  save();
+
+  const etiqueta = api.etiquetaDestino(carpetaActual);
+  if (elements.carpetaEstado) {
+    elements.carpetaEstado.textContent =
+      'Los archivos se guardarán en ' + etiqueta + '. Chrome crea la carpeta en la primera descarga.';
+  }
+  if (!cfg.silencioso) {
+    status(resultado.existia ? 'Ya existía: ' + etiqueta : 'Carpeta lista: ' + etiqueta, 'ok');
+  }
+}
+
+/* =======================================================================
  * Versión y actualización
  * ===================================================================== */
 
@@ -475,7 +567,12 @@ async function init() {
   elements.formatHint = $('formatHint');
   elements.imageFormatHint = $('imageFormatHint');
   elements.minHeight = $('minHeight');
-  elements.folder = $('folder');
+  elements.carpetaNueva = $('carpetaNueva');
+  elements.carpetasGuardadas = $('carpetasGuardadas');
+  elements.destinoTexto = $('destinoTexto');
+  elements.destinoActual = $('destinoActual');
+  elements.carpetaPrevia = $('carpetaPrevia');
+  elements.carpetaEstado = $('carpetaEstado');
   elements.askWhereToSave = $('askWhereToSave');
   elements.filenameTemplate = $('filenameTemplate');
   elements.autoFallback = $('autoFallback');
@@ -515,8 +612,24 @@ async function init() {
       save();
     });
   });
+  elements.carpetaNueva.addEventListener('input', () => pintarPreviaCarpeta());
+  elements.carpetaNueva.addEventListener('change', () => {
+    // Si lo que hay escrito es una carpeta recordada, se usa directamente.
+    const escrita = window.XVD_FOLDERS.claveDeCarpeta(elements.carpetaNueva.value);
+    if (!escrita) return;
+    const guardada = historialCarpetas.find((c) => window.XVD_FOLDERS.claveDeCarpeta(c) === escrita);
+    if (guardada) usarCarpeta(guardada, { silencioso: true });
+  });
+  $('crearCarpeta').addEventListener('click', () => usarCarpeta(elements.carpetaNueva.value));
+  $('carpetaPredeterminada').addEventListener('click', () => {
+    carpetaActual = '';
+    elements.carpetaNueva.value = '';
+    renderCarpetas();
+    save();
+    status('Se guardará en Descargas (predeterminada)', 'ok');
+  });
+
   [
-    elements.folder,
     elements.filenameTemplate,
     elements.imageFilenameTemplate,
     elements.instagramFilenameTemplate,
@@ -524,16 +637,7 @@ async function init() {
   ].forEach((input) => {
     input.addEventListener('input', save);
   });
-  elements.folder.addEventListener('blur', () => {
-    const cleaned = elements.folder.value
-      .split(/[\\/]+/)
-      .filter((part) => part && part !== '.' && part !== '..')
-      .join('/');
-    if (cleaned !== elements.folder.value) {
-      elements.folder.value = cleaned;
-      save();
-    }
-  });
+
 
   $('reset').addEventListener('click', async () => {
     await setStored({ ...DEFAULT_SETTINGS });
