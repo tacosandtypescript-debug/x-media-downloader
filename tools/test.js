@@ -68,7 +68,7 @@ function loadContentScript() {
 }
 
 const xvd = loadContentScript();
-const { normalizeVariant, normalizeMediaEntity, extractMediaId, planDownload, buildFilename, sanitizeFolder, parseMasterPlaylist, parseMediaPlaylist } = xvd;
+const { normalizeVariant, normalizeMediaEntity, extractMediaId, planDownload, bitrateDeAudio, buildFilename, sanitizeFolder, parseMasterPlaylist, parseMediaPlaylist } = xvd;
 
 /* --------------------------------------- carga del módulo de imágenes -- */
 
@@ -294,10 +294,23 @@ test('WebM sin variantes WebM avisa y usa MP4', () => {
   assert.strictEqual(plan.ordered[0].ext, 'mp4');
 });
 
+test('M4A con pista de audio progresiva la usa directamente', () => {
+  const withAudio = normalizeMediaEntity({
+    id_str: '1',
+    video_info: { variants: MEDIA.variants.concat([{ url: 'https://video.twimg.com/a.m4a', content_type: 'audio/mp4' }]) }
+  });
+  const plan = planDownload(withAudio, config({ format: 'm4a' }));
+  assert.ok(plan.audio, 'debe activar el modo solo audio');
+  assert.strictEqual(plan.audio.formato, 'm4a');
+  assert.strictEqual(plan.audio.directo, true);
+  assert.ok(plan.audio.variant.url.endsWith('.m4a'));
+});
+
 test('M4A sin pista de audio avisa y entrega el MP4', () => {
   const plan = planDownload(media, config({ format: 'm4a', audioFallback: 'mp4' }));
   assert.ok(/pista de audio independiente/i.test(plan.notice));
   assert.strictEqual(plan.ordered[0].ext, 'mp4');
+  assert.ok(!plan.audio);
 });
 
 test('M4A con audioFallback=error no descarga nada', () => {
@@ -312,7 +325,10 @@ test('M4A usa la variante de audio cuando existe', () => {
     video_info: { variants: MEDIA.variants.concat([{ url: 'https://video.twimg.com/a.m4a', content_type: 'audio/mp4' }]) }
   });
   const plan = planDownload(withAudio, config({ format: 'm4a' }));
-  assert.strictEqual(plan.ordered[0].ext, 'm4a');
+  assert.ok(plan.audio, 'debe activar el modo solo audio');
+  assert.strictEqual(plan.audio.formato, 'm4a');
+  assert.strictEqual(plan.audio.directo, true);
+  assert.ok(plan.audio.variant.url.endsWith('.m4a'));
 });
 
 test('Calidad personalizada 1080p avisa si solo hay 720p', () => {
@@ -743,6 +759,127 @@ test('extremo a extremo: puente -> mundo aislado -> 3828x2160 y nombre _2160p', 
     config({ folder: 'X Videos' })
   );
   assert.strictEqual(nombre, 'X Videos/axichuhai_2100475372890472448_2160p.mp4');
+});
+
+/* ------------------------------------------- solo audio (M4A y MP3) -- */
+
+console.log('\nSolo audio: pista AAC del HLS y conversión a MP3');
+
+// Manifiesto REAL del tweet 2100475914182107353: tres renditions de audio solas
+// (32/64/128 kbps) y cuatro de video que las referencian con AUDIO="audio-N".
+const MAESTRO_REAL = [
+  '#EXTM3U',
+  '#EXT-X-VERSION:6',
+  '#EXT-X-INDEPENDENT-SEGMENTS',
+  '#EXT-X-MEDIA:NAME="Audio",TYPE=AUDIO,GROUP-ID="audio-32000",AUTOSELECT=YES,URI="/amplify_video/2100475372890472448/pl/mp4a/32000/8C8IB-E1-NEsCGYG.m3u8"',
+  '#EXT-X-MEDIA:NAME="Audio",TYPE=AUDIO,GROUP-ID="audio-64000",AUTOSELECT=YES,URI="/amplify_video/2100475372890472448/pl/mp4a/64000/0Y3Vk00JUsHI0b8E.m3u8"',
+  '#EXT-X-MEDIA:NAME="Audio",TYPE=AUDIO,GROUP-ID="audio-128000",AUTOSELECT=YES,URI="/amplify_video/2100475372890472448/pl/mp4a/128000/YWpWv8JpM4Uvknoj.m3u8"',
+  '',
+  '#EXT-X-STREAM-INF:AVERAGE-BANDWIDTH=182065,BANDWIDTH=255989,RESOLUTION=478x270,CODECS="mp4a.40.2,avc1.4D4015",AUDIO="audio-32000"',
+  '/amplify_video/2100475372890472448/pl/avc1/478x270/bpa192zkjVe3-62l.m3u8',
+  '#EXT-X-STREAM-INF:AVERAGE-BANDWIDTH=544456,BANDWIDTH=797324,RESOLUTION=638x360,CODECS="mp4a.40.2,avc1.4D401E",AUDIO="audio-64000"',
+  '/amplify_video/2100475372890472448/pl/avc1/638x360/a-dLVZ7f0Q49ZygN.m3u8',
+  '#EXT-X-STREAM-INF:AVERAGE-BANDWIDTH=1469151,BANDWIDTH=2101350,RESOLUTION=1276x720,CODECS="mp4a.40.2,avc1.64001F",AUDIO="audio-128000"',
+  '/amplify_video/2100475372890472448/pl/avc1/1276x720/cRT-3WqCKLK2JI9A.m3u8',
+  '#EXT-X-STREAM-INF:AVERAGE-BANDWIDTH=4491422,BANDWIDTH=6169555,RESOLUTION=1914x1080,CODECS="mp4a.40.2,avc1.640032",AUDIO="audio-128000"',
+  '/amplify_video/2100475372890472448/pl/avc1/1914x1080/ffKaF97ZjCCISsZa.m3u8'
+].join('\n');
+
+// Playlist de la rendition de 128 kbps (fMP4 con init + 8 segmentos .m4s).
+const AUDIO_128 = [
+  '#EXTM3U',
+  '#EXT-X-VERSION:6',
+  '#EXT-X-MEDIA-SEQUENCE:0',
+  '#EXT-X-TARGETDURATION:3',
+  '#EXT-X-PLAYLIST-TYPE:VOD',
+  '#EXT-X-MAP:URI="/amplify_video/2100475372890472448/aud/mp4a/0/0/128000/FxWAOA-dJ2i7I6Sy.mp4"',
+  '#EXTINF:3.000,',
+  '/amplify_video/2100475372890472448/aud/mp4a/0/3000/128000/vMsIrQl0-q7fN5uM.m4s',
+  '#EXTINF:3.000,',
+  '/amplify_video/2100475372890472448/aud/mp4a/3000/6000/128000/FfnhN30Y8YnXRQa_.m4s'
+].join('\n');
+
+function mediaConAudioReal() {
+  const entidad = normalizeMediaEntity({
+    id_str: MEDIA_ID,
+    media_url_https: MEDIA.poster,
+    video_info: {
+      variants: MEDIA.variants.concat([
+        { content_type: 'application/x-mpegURL', url: 'https://video.twimg.com/amplify_video/2100475372890472448/pl/grZ8GF8UaJNPNPVu.m3u8' }
+      ])
+    }
+  });
+  const audio = parseMasterPlaylist(
+    MAESTRO_REAL,
+    'https://video.twimg.com/amplify_video/2100475372890472448/pl/grZ8GF8UaJNPNPVu.m3u8'
+  ).variants.filter((v) => v.audioOnly);
+  return { ...entidad, variants: entidad.variants.concat(audio) };
+}
+
+test('el manifiesto real de X trae 3 pistas de audio y 4 de video', () => {
+  const analizado = parseMasterPlaylist(MAESTRO_REAL, 'https://video.twimg.com/pl/x.m3u8');
+  const audio = analizado.variants.filter((v) => v.audioOnly);
+  assert.strictEqual(analizado.streams.length, 4);
+  assert.strictEqual(audio.length, 3);
+  assert.deepStrictEqual(
+    Array.from(audio, (v) => Number(v.bitrate)).sort((a, b) => a - b),
+    [32000, 64000, 128000]
+  );
+  assert.ok(audio.every((v) => /\/mp4a\/\d+\//.test(v.url)), 'las URLs llevan el bitrate');
+});
+
+test('bitrateDeAudio deduce el bitrate de la URL', () => {
+  assert.strictEqual(bitrateDeAudio('https://video.twimg.com/amplify_video/1/pl/mp4a/128000/x.m3u8'), 128000);
+  assert.strictEqual(bitrateDeAudio('https://video.twimg.com/amplify_video/1/aud/mp4a/0/0/64000/x.m4s'), 64000);
+  assert.strictEqual(bitrateDeAudio('https://video.twimg.com/otra/cosa.m3u8'), 0);
+});
+
+test('la playlist de audio del HLS es fMP4 y tiene init + segmentos', () => {
+  const playlist = parseMediaPlaylist(AUDIO_128, 'https://video.twimg.com/amplify_video/1/pl/mp4a/128000/x.m3u8');
+  assert.strictEqual(playlist.isFmp4, true);
+  assert.strictEqual(playlist.encrypted, false);
+  assert.strictEqual(playlist.segments.length, 2);
+  assert.ok(playlist.initSegment.endsWith('.mp4'));
+});
+
+test('M4A con manifiesto real elige la pista de 128 kbps', () => {
+  const plan = planDownload(mediaConAudioReal(), config({ format: 'm4a' }));
+  assert.ok(plan.audio, plan.error || 'debe activar el modo solo audio');
+  assert.strictEqual(plan.audio.formato, 'm4a');
+  assert.strictEqual(plan.audio.kbps, 128);
+  assert.ok(plan.audio.variant.url.includes('/mp4a/128000/'), plan.audio.variant.url);
+  assert.ok(!plan.audio.directo, 'en X va por el HLS, no por una pista progresiva');
+});
+
+test('MP3 usa la misma pista y pide conversión', () => {
+  const plan = planDownload(mediaConAudioReal(), config({ format: 'mp3' }));
+  assert.ok(plan.audio);
+  assert.strictEqual(plan.audio.formato, 'mp3');
+  assert.strictEqual(plan.audio.kbps, 128);
+});
+
+test('el archivo de audio se llama con su bitrate y su extensión', () => {
+  const entidad = mediaConAudioReal();
+  const plan = planDownload(entidad, config({ format: 'm4a' }));
+  const contexto = { screenName: 'axichuhai', tweetId: '2100475914182871232', date: '2026-09-18' };
+
+  const nombreM4a = buildFilename(
+    entidad,
+    { ...plan.audio.variant, ext: 'm4a', height: 0, bitrate: plan.audio.kbps * 1000 },
+    contexto,
+    null,
+    config({ folder: 'X Videos' })
+  );
+  assert.strictEqual(nombreM4a, 'X Videos/axichuhai_' + MEDIA_ID + '_128kbps.m4a');
+
+  const nombreMp3 = buildFilename(
+    entidad,
+    { ...plan.audio.variant, ext: 'mp3', height: 0, bitrate: plan.audio.kbps * 1000 },
+    contexto,
+    null,
+    config({ folder: 'X Videos' })
+  );
+  assert.ok(nombreMp3.endsWith('_128kbps.mp3'), nombreMp3);
 });
 
 /* ------------------------------------------------------------------ cierre -- */

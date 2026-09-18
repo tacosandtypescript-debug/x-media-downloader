@@ -269,6 +269,11 @@ with sync_playwright() as p:
     def ruta_video(route):
         url = route.request.url
         peticiones["video"].append(url)
+        # El audio (playlists y segmentos del HLS) se pide al CDN REAL de X, para
+        # que la prueba de solo audio use bytes auténticos.
+        if ".m3u8" in url or "/mp4a/" in url or ".m4s" in url or "/aud/" in url:
+            route.continue_()
+            return
         route.fulfill(status=200, content_type="video/mp4", body=FAKE_MEDIA)
 
     def ruta_imagen(route):
@@ -399,9 +404,86 @@ with sync_playwright() as p:
     check("pide name=orig para las 4 imágenes distintas",
           set(origs) >= {"XVDTESTIMG001", "XVDTESTIMG002", "XVDTESTIMG003", "XVDTESTIMG004"}, origs)
 
+    # ================================================== 5. SOLO AUDIO
+    print("\n5. SOLO AUDIO (pista AAC del HLS, real del CDN de X)")
+
+    def descargar_solo_audio(formato, esperado_kb, nombre):
+        popup.evaluate("f => new Promise(r => chrome.storage.sync.set({format: f}, r))", formato)
+        page.reload(wait_until="domcontentloaded")
+        page.wait_for_selector(SEL_VIDEO, timeout=20000)
+        esperar(page, 1.5)
+
+        # Se anotan las descargas que ya existían: la de esta fase debe ser nueva.
+        ids_antes = {
+            d.get("id")
+            for d in popup.evaluate("() => new Promise(r => chrome.downloads.search({limit: 30}, r))")
+        }
+        page.locator(SEL_VIDEO).first.click()
+
+        encontrado = None
+        limite = time.time() + 90
+        while time.time() < limite:
+            try:
+                lista = popup.evaluate(
+                    "() => new Promise(r => chrome.downloads.search({limit: 12, orderBy: ['-startTime']}, r))"
+                )
+            except Exception:  # noqa: BLE001
+                lista = []
+            # El audio generado se descarga desde una URL de Blob: es su seña.
+            for d in lista:
+                if (
+                    (d.get("url") or "").startswith("blob:")
+                    and d.get("state") == "complete"
+                    and d.get("id") not in ids_antes
+                ):
+                    encontrado = d
+                    break
+            if encontrado:
+                break
+            esperar(page, 1.0)
+
+        check(f"{nombre}: la descarga termina", encontrado is not None,
+              (encontrado or {}).get("state", "sin descarga"))
+        if not encontrado:
+            return None
+
+        # El nombre pedido está en el registro (Playwright renombra a GUID en disco).
+        pedidos = [
+            str(e.get("detail", ""))
+            for e in leer_registro(popup)
+            if "_128kbps." + formato in str(e.get("detail", ""))
+        ]
+        check(f"{nombre}: se pide con el bitrate en el nombre",
+              bool(pedidos), pedidos[-1][:120] if pedidos else "sin registro")
+
+        ruta = Path(encontrado.get("filename", ""))
+        if not ruta.exists():
+            check(f"{nombre}: el archivo existe en disco", False, ruta)
+            return None
+        kb = ruta.stat().st_size / 1024
+        check(f"{nombre}: pesa lo que debe (~{esperado_kb} KB, no 40 MB)",
+              abs(kb - esperado_kb) < esperado_kb * 0.35, f"{kb:.1f} KB")
+        return ruta
+
+    # M4A: la pista AAC tal cual, en un contenedor MP4 (primera caja "ftyp")
+    ruta_m4a = descargar_solo_audio("m4a", 373, "M4A")
+    if ruta_m4a:
+        cabecera = ruta_m4a.read_bytes()[:12]
+        check("M4A: es un MP4 real (caja ftyp a partir del byte 4)", cabecera[4:8] == b"ftyp", cabecera.hex())
+
+    # MP3: la misma pista recodificada por lamejs dentro del navegador
+    ruta_mp3 = descargar_solo_audio("mp3", 368, "MP3")
+    if ruta_mp3:
+        cabecera = ruta_mp3.read_bytes()[:4]
+        check("MP3: empieza con una trama MPEG válida",
+              cabecera[0] == 0xFF and (cabecera[1] & 0xE0) == 0xE0, cabecera.hex())
+
+    audio_pedido = [u for u in peticiones["video"] if "/mp4a/" in u]
+    check("se piden las playlists de audio del manifiesto real",
+          any(".m3u8" in u for u in audio_pedido), audio_pedido[:2])
+
     volcar_diagnostico(popup, "DIAGNÓSTICO FINAL", sw)
     page.screenshot(path=str(SHOTS / "pagina.png"), full_page=True)
-
     # Captura del popup con el registro de diagnóstico ya relleno.
     popup.locator("#tab-general").click()
     esperar(page, 1.0)

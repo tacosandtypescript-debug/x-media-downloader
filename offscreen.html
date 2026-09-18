@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <title>Descargador de medios para X — descargas generadas</title>
+  </head>
+  <body>
+    <!--
+      Documento offscreen (chrome.offscreen, motivo BLOBS).
+
+      ¿Por qué hace falta? El audio hay que FABRICARLO en memoria: se unen los
+      segmentos del HLS y, si se pide MP3, se recodifica con lamejs. Eso no se
+      puede hacer en el service worker (no tiene Web Audio ni DOM) ni descargar
+      desde un content script conservando la subcarpeta configurada. Este
+      documento crea el Blob, su URL y lo entrega a chrome.downloads, de modo
+      que la descarga se comporta igual que las demás (misma carpeta, mismo
+      seguimiento, mismos reintentos).
+    -->
+    <script src="offscreen.js"></script>
+  </body>
+</html>

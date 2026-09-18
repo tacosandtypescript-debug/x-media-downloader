@@ -270,11 +270,174 @@ async function comprobarActualizacion(motivo) {
 }
 
 /* =======================================================================
+ * Audio generado (M4A/MP3)
+ *
+ * El audio no se puede descargar con una URL: hay que fabricarlo uniendo los
+ * segmentos del HLS y, si se pide MP3, recodificarlo. Eso ocurre en el content
+ * script (tiene Web Audio), pero un content script no puede lanzar una descarga
+ * con subcarpeta, así que los bytes se pasan aquí y se guardan desde el
+ * documento offscreen, con el mismo seguimiento que las demás descargas.
+ * ===================================================================== */
+
+let offscreenListo = false;
+
+async function asegurarOffscreen() {
+  if (offscreenListo) return true;
+  try {
+    if (chrome.offscreen && typeof chrome.offscreen.hasDocument === 'function') {
+      if (await chrome.offscreen.hasDocument()) {
+        offscreenListo = true;
+        return true;
+      }
+    }
+    await chrome.offscreen.createDocument({
+      url: 'offscreen.html',
+      reasons: ['BLOBS'],
+      justification: 'Crear el Blob del audio generado (M4A/MP3) y entregarlo a chrome.downloads.'
+    });
+    offscreenListo = true;
+    return true;
+  } catch (error) {
+    const mensaje = String(error && error.message ? error.message : error);
+    if (/single offscreen|already exists|Only a single/i.test(mensaje)) {
+      offscreenListo = true;
+      return true;
+    }
+    bgLog('error', 'audio', 'No se pudo preparar el documento offscreen', { motivo: mensaje });
+    return false;
+  }
+}
+
+/** Inyecta el codificador MP3 (lamejs) en la pestaña que lo pida. */
+async function inyectarLamejs(tabId) {
+  if (typeof tabId !== 'number' || tabId < 0) return false;
+  try {
+    await chrome.scripting.executeScript({ target: { tabId }, files: ['vendor/lamejs.iife.js'] });
+    return true;
+  } catch (error) {
+    bgLog('error', 'audio', 'No se pudo inyectar el codificador MP3', {
+      motivo: String(error && error.message ? error.message : error)
+    });
+    return false;
+  }
+}
+
+async function handleGeneratedDownload(message, sender) {
+  const filename = sanitizeDownloadPath(message.filename);
+  if (!message.base64) {
+    return { ok: false, error: 'No hay datos de audio que guardar.' };
+  }
+
+  if (!(await asegurarOffscreen())) {
+    return { ok: false, error: 'No se pudo preparar la descarga del audio generado.' };
+  }
+
+  const respuesta = await new Promise((resolve) => {
+    try {
+      chrome.runtime.sendMessage(
+        {
+          type: 'XVD_CREAR_BLOB',
+          target: 'offscreen',
+          transferId: message.transferId,
+          trozos: message.trozos,
+          base64: message.base64,
+          ultimo: !!message.ultimo,
+          mime: message.mime || 'audio/mp4'
+        },
+        (r) => {
+          void chrome.runtime.lastError;
+          resolve(r || { ok: false, error: 'El documento offscreen no respondió.' });
+        }
+      );
+    } catch (error) {
+      resolve({ ok: false, error: String(error && error.message ? error.message : error) });
+    }
+  });
+
+  if (!respuesta || !respuesta.ok) {
+    bgLog('error', 'audio', 'Fallo al preparar el archivo de audio', { motivo: respuesta && respuesta.error });
+    return respuesta || { ok: false, error: 'Fallo al preparar el archivo de audio.' };
+  }
+
+  // Los trozos intermedios aún no forman el archivo.
+  if (respuesta.parcial) return { ok: true, parcial: true };
+
+  // El documento offscreen devuelve una URL de Blob; la descarga la lanza aquí,
+  // que es donde están chrome.downloads y el seguimiento de descargas.
+  let downloadId;
+  try {
+    downloadId = await download({
+      url: respuesta.url,
+      filename,
+      saveAs: !!message.saveAs,
+      conflictAction: 'uniquify'
+    });
+  } catch (error) {
+    bgLog('error', 'audio', 'chrome.downloads rechazó el audio generado', {
+      archivo: filename,
+      motivo: String(error && error.message ? error.message : error)
+    });
+    return { ok: false, error: 'No se pudo guardar el audio: ' + (error && error.message ? error.message : '') };
+  }
+
+  const tabId = sender && sender.tab && typeof sender.tab.id === 'number' ? sender.tab.id : -1;
+  await rememberDownload(downloadId, {
+    tabId,
+    filename,
+    url: '(audio generado en la extensión)',
+    transferId: respuesta.transferId,
+    startedAt: Date.now()
+  });
+  bgLog('info', 'audio', 'Audio generado entregado a chrome.downloads', {
+    id: downloadId,
+    archivo: filename,
+    kb: Math.round((respuesta.bytes || 0) / 1024)
+  });
+
+  return { ok: true, downloadId, filename };
+}
+
+/** Avisa al documento offscreen de que ya puede liberar la URL del Blob. */
+function liberarBlob(transferId) {
+  if (!transferId) return;
+  try {
+    chrome.runtime.sendMessage({ type: 'XVD_REVOCAR', target: 'offscreen', transferId }, () => {
+      void chrome.runtime.lastError;
+    });
+  } catch (_) {
+    /* el documento ya no está */
+  }
+}
+
+/* =======================================================================
  * Mensajería interna: content script y popup
  * ===================================================================== */
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message !== 'object') return undefined;
+
+  // Los mensajes dirigidos al documento offscreen no se procesan aquí.
+  if (message.target === 'offscreen') return undefined;
+
+  if (message.type === 'XVD_INJECT_LAMEJS') {
+    const tabId = sender && sender.tab && typeof sender.tab.id === 'number' ? sender.tab.id : -1;
+    inyectarLamejs(tabId).then((ok) =>
+      sendResponse({
+        ok,
+        error: ok ? '' : 'No se pudo preparar el codificador MP3. Prueba con el formato M4A.'
+      })
+    );
+    return true;
+  }
+
+  if (message.type === 'XVD_DOWNLOAD_BYTES') {
+    handleGeneratedDownload(message, sender)
+      .then((resultado) => sendResponse(resultado))
+      .catch((error) =>
+        sendResponse({ ok: false, error: error && error.message ? error.message : String(error) })
+      );
+    return true;
+  }
 
   if (message.type === 'XVD_LOG') {
     appendLog(message.entry || {});
@@ -425,6 +588,7 @@ async function handleDownloadDelta(delta) {
   if (!record) return;
 
   if (delta.state.current === 'complete') {
+    if (record.transferId) liberarBlob(record.transferId);
     await forgetDownload(delta.id);
 
     // Datos definitivos de la descarga: tamaño real y ruta en disco.

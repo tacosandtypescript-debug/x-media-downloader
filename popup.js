@@ -40,7 +40,11 @@ const FORMAT_HINTS = {
   mp4: '<strong>MP4</strong> máxima compatibilidad. Si el video no tiene MP4, se avisa y se usa WebM.',
   webm: '<strong>WebM</strong> útil para códecs VP9/AV1. Si no existe, se descarga MP4 en la misma calidad.',
   m4a:
-    '<strong>M4A / audio</strong> descarga solo la pista de audio si X la ofrece; si no, se aplica la opción elegida.'
+    '<strong>M4A · solo audio</strong> baja la pista AAC del stream (128 kbps) y la guarda sin recomprimir: ' +
+    '370 KB en vez de 40 MB. Si el video no publica pista aparte, se avisa.',
+  mp3:
+    '<strong>MP3 · solo audio</strong> baja esa misma pista y la convierte a MP3 en tu equipo (tarda ~1 s ' +
+    'por minuto de audio). Recomprimir baja un poco la calidad; si quieres la original, usa M4A.'
 };
 
 const IMAGE_FORMAT_HINTS = {

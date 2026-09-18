@@ -33,7 +33,10 @@ Toda la interfaz (botones, avisos y popup de opciones) está **en español**.
   citas y en el visor ampliado (modal). Funciona con el scroll infinito y la navegación SPA.
 - **Selección de la máxima calidad** entre todas las variantes del manifiesto del video,
   comparando resolución y bitrate.
-- **Formato configurable**: `Auto`, `MP4` (por defecto), `WebM` y `M4A / audio`.
+- **Formato configurable**: `Auto`, `MP4` (por defecto), `WebM`, `M4A` y `MP3`.
+- **Solo audio de verdad** (`M4A` y `MP3`): X publica la pista AAC suelta en su stream HLS
+  (32, 64 y **128 kbps**), así que la extensión la une sin recomprimir → unos **370 KB en vez de
+  40 MB**. Con `MP3` además la convierte en tu equipo (lado a lado, la calidad la manda el MP3).
 - **Calidad máxima o personalizada** (nunca por debajo de 2160p, 1440p, 1080p, 720p, 480p o 360p).
 - **Reintentos automáticos**: si una variante falla (red, CDN, disco), se reintenta con la
   siguiente calidad inferior.
@@ -177,7 +180,7 @@ Haz clic en el icono de la extensión para abrir el panel, organizado en **tres 
 
 | Opción | Valores | Descripción |
 | --- | --- | --- |
-| **Formato de video** | `Auto`, `MP4`, `WebM`, `M4A` | `Auto` = mejor variante disponible. `MP4` es el valor por defecto. |
+| **Formato de video** | `Auto`, `MP4`, `WebM`, `M4A`, `MP3` | `Auto` = mejor variante disponible. `MP4` es el valor por defecto. `M4A`/`MP3` descargan **solo el audio**. |
 | **Calidad de video** | `Máxima disponible`, `Personalizada` | `Personalizada` usa la altura mínima elegida. |
 | **Altura mínima** | 2160p, 1440p, 1080p, 720p, 480p, 360p | Solo se aplica con la calidad personalizada. |
 | **Reintentar con calidad inferior si falla** | casilla | Respaldo automático ante errores de descarga. |
@@ -231,13 +234,22 @@ x-video-downloader/
 │   └── icon128.png      Icono de instalación / Chrome Web Store
 ├── tools/
 │   ├── make-icons.js    Generador de iconos sin dependencias (opcional)
-│   ├── test.js          Pruebas de la lógica pura (50 comprobaciones)
+│   ├── test.js          Pruebas de la lógica pura (57 comprobaciones)
 │   ├── check-popup.js   Comprobación de coherencia popup.html ↔ popup.js
-│   ├── e2e-test.py      Prueba end-to-end en un Chromium real (23 comprobaciones)
+│   ├── e2e-test.py      Prueba end-to-end en un Chromium real
+│   ├── build-audio-test.js  Une la pista de audio de un HLS a un M4A (para pruebas)
 │   └── fixtures/
 │       └── tweet-video-2100475914182107353.json   Tweet real usado como fixture
+├── vendor/
+│   ├── lamejs.iife.js       Codificador MP3 (lamejs 1.2.7, LGPL) — solo para M4A→MP3
+│   └── lamejs.LICENSE.txt   Licencia de la librería
 └── README.md            Este documento
 ```
+
+> **Licencia de terceros:** `vendor/lamejs.iife.js` es [lamejs](https://github.com/breezystack/lamejs)
+> 1.2.7, bajo **LGPL**. Se incluye sin modificar junto a su licencia. Solo interviene cuando pides
+> MP3; si no lo usas, puedes borrar la carpeta `vendor/` y la extensión sigue funcionando (el resto
+> del audio es unión de segmentos, sin dependencias).
 
 > **Sobre los iconos:** la funcionalidad de imágenes no necesita archivos de icono nuevos. Los
 > distintivos que pide la especificación **son elementos de la propia página**, creados en tiempo de
@@ -337,7 +349,46 @@ para el respaldo de menor calidad.
 
 ---
 
-## Diagnóstico: «el botón aparece pero no descarga»
+## Solo audio (M4A y MP3)
+
+En X, los MP4 que publica la API llevan vídeo y audio juntos, pero **el stream HLS sí trae la pista
+de audio suelta**. Comprobado sobre el manifiesto real de un video:
+
+```
+#EXT-X-MEDIA:GROUP-ID="audio-32000", TYPE=AUDIO, URI="…/pl/mp4a/32000/….m3u8"
+#EXT-X-MEDIA:GROUP-ID="audio-64000", TYPE=AUDIO, URI="…/pl/mp4a/64000/….m3u8"
+#EXT-X-MEDIA:GROUP-ID="audio-128000", TYPE=AUDIO, URI="…/pl/mp4a/128000/….m3u8"
+
+478x270 → audio-32000      1276x720  → audio-128000
+638x360 → audio-64000      1914x1080 → audio-128000
+```
+
+Esa playlist de 128 kbps es fMP4 (`#EXT-X-MAP` + 8 segmentos `.m4s`), sin cifrar y de **366 KB**
+frente a los 40 MB del vídeo 4K.
+
+- **M4A**: se une el segmento inicial con los segmentos y se guarda tal cual. **Sin recomprimir**: es
+  exactamente el AAC que publica X.
+- **MP3**: se decodifica ese M4A (`OfflineAudioContext.decodeAudioData`) y se recodifica con
+  **lamejs** dentro del navegador. Medido: **1,2 s** para 23 s de audio. Como es una recodificación,
+  la calidad baja un poco; si quieres el original, usa M4A.
+
+**Dónde se hace cada cosa** (y por qué):
+
+| Paso | Dónde | Motivo |
+| --- | --- | --- |
+| Elegir la pista y unir los segmentos | content script | Tiene acceso a la red de la página y a Web Audio. |
+| Recodificar a MP3 | content script | `lamejs` se inyecta en la pestaña solo cuando hace falta (165 KB, no 25 MB de ffmpeg). |
+| Crear el archivo | documento offscreen | Hay que fabricar un Blob en memoria y darle una URL descargable. |
+| Lanzar la descarga | service worker | Es quien tiene `chrome.downloads` y el seguimiento (carpeta, avisos, registro). |
+
+> Dos cosas que cuestan un rato averiguar y quedan documentadas en el código:
+> 1. `chrome.runtime.sendMessage` **serializa a JSON**, no usa *structured clone*: un `ArrayBuffer`
+>    llega como `{}`. Por eso el audio viaja en trozos codificados en base64.
+> 2. En un documento offscreen **no existen `chrome.storage` ni `chrome.downloads`**. Llamar a
+>    `chrome.downloads.onChanged.addListener` allí lanza, aborta el archivo entero y los mensajes
+>    fallan con *«Receiving end does not exist»*. El offscreen solo usa `chrome.runtime` y el DOM.
+
+---
 
 La extensión lleva un **registro de diagnóstico** pensado exactamente para esto. Cada paso relevante
 (barrido del DOM, estrategias probadas, respuesta del puente, variante elegida, despacho a
@@ -497,7 +548,10 @@ segundos por combinación de imagen + resolución + formato.
 | «No se pudo obtener la imagen en la máxima resolución» | La imagen todavía no tenía `src` al hacer clic: espera a que termine de cargar. |
 | «No se pudo descargar en resolución máxima, usando resolución alternativa» | `orig` no existe para esa imagen; se está descargando `4096x4096`, `large` o `medium`. |
 | «No se pudo descargar la imagen: ninguna resolución está disponible» | El CDN no sirve la imagen (borrada, privada o bloqueada). |
-| Se descarga una página de error en lugar de la imagen | Desactiva «Comprobar disponibilidad antes de descargar» y vuelve a activarla, o reintenta: el respaldo de resolución debería corregirlo. |
+| «Se descarga una página de error en lugar de la imagen» | Desactiva «Comprobar disponibilidad antes de descargar» y vuelve a activarla, o reintenta: el respaldo de resolución debería corregirlo. |
+| Al pedir solo audio avisa de que no hay pista independiente | Ese video no publica pista suelta (pasa en videos muy antiguos o subidos sin audio separado). Usa MP4; el archivo incluye el audio. |
+| El MP3 tarda unos segundos | Es normal: la conversión va a ~1,2 s por cada 23 s de audio. El aviso de la página muestra el progreso. |
+| El MP3 suena peor que el M4A | Es una recodificación con pérdida. Si quieres el audio original de X, usa M4A. |
 | El botón tapa la imagen en el visor ampliado | El botón ya se coloca abajo a la derecha dentro del lightbox; si aun así molesta, activa «Botón de imagen compacto» o «Mostrar los botones solo al pasar el ratón». |
 | «Descargar todas» no aparece | La galería no se ha reconocido como tal (1 imagen) o el botón está desactivado en el popup. |
 | El archivo se guarda sin subcarpeta | Chrome crea la carpeta indicada; los caracteres inválidos se sustituyen por `_`. |
@@ -579,6 +633,8 @@ Los mensajes de error del service worker se traducen desde los códigos de `chro
 | No interfiere con la reproducción ni con los controles nativos | ✅ el `<video>` nunca se modifica; verificado que el clic no se propaga |
 | Reintentos y respaldo de menor calidad | ✅ 3 intentos de resolución + respaldo encadenado |
 | El manifiesto se lee aunque el content script viva en un mundo aislado | ✅ `page-bridge.js` en el mundo MAIN (probado contra las fibras de React) |
+| Solo audio (`M4A`) sin recomprimir | ✅ **verificado end-to-end**: 373 KB uniendo la pista AAC de 128 kbps del HLS (frente a 40 MB del vídeo) |
+| Solo audio en `MP3` | ✅ **verificado end-to-end**: 368 KB, cabecera MPEG válida, 1,2 s de conversión para 23 s de audio |
 
 ### Imágenes
 

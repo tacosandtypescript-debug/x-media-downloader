@@ -39,7 +39,7 @@
   const TOASTS_ID = 'xvd-toasts';
 
   /** Versión del núcleo (se muestra en el diagnóstico del popup). */
-  const coreVersion = '2.2.0';
+  const coreVersion = '2.3.0';
 
   const DEFAULT_SETTINGS = {
     /* --- General --- */
@@ -768,7 +768,7 @@
     const audioVariants = audios.map((a) => ({
       url: a.url,
       contentType: 'application/x-mpegURL',
-      bitrate: 0,
+      bitrate: bitrateDeAudio(a.url),
       width: 0,
       height: 0,
       kind: 'hls',
@@ -1039,6 +1039,64 @@
     return 'No se pudo obtener el video en la calidad solicitada. Inténtalo de nuevo en unos segundos.';
   }
 
+  /** Bitrate de una rendition de audio deducido de su URL (…/mp4a/128000/…). */
+  function bitrateDeAudio(url) {
+    const texto = String(url || '');
+    // Ojo: el bitrate tiene 5-6 dígitos (128000), no hay que truncarlo a 4.
+    // Las playlists son …/pl/mp4a/128000/x.m3u8 y los segmentos
+    // …/aud/mp4a/0/0/128000/x.m4s, así que se prueban los dos patrones.
+    let m = texto.match(/\/mp4a\/(\d{3,7})/);
+    if (m) return Number(m[1]);
+    m = texto.match(/\/mp4a\/(?:\d+\/)*(\d{3,7})\//);
+    if (m) return Number(m[1]);
+    m = texto.match(/audio-(\d{3,7})/);
+    return m ? Number(m[1]) : 0;
+  }
+
+  /**
+   * Si se ha pedido solo audio, hay que conocer las pistas de audio que ofrece
+   * el manifiesto maestro. La entidad multimedia solo trae la URL del maestro
+   * (m3u8), así que se descarga y se añaden sus renditions de audio.
+   */
+  async function completarRenditionsDeAudio(media) {
+    if (settings.format !== 'm4a' && settings.format !== 'mp3') return media;
+    const variantes = media.variants || [];
+    if (variantes.some((v) => v.kind === 'hls' && v.audioOnly)) return media;
+
+    const maestros = variantes.filter((v) => v.kind === 'hls' && !v.audioOnly);
+    const extra = [];
+
+    for (const maestro of maestros.slice(0, 2)) {
+      const cacheado = playlistCache.get(maestro.url);
+      let analizado = null;
+      if (cacheado && Date.now() - cacheado.ts < PLAYLIST_TTL) {
+        analizado = cacheado.value;
+      } else {
+        try {
+          const texto = await fetchText(maestro.url);
+          analizado = parseMasterPlaylist(texto, maestro.url);
+          playlistCache.set(maestro.url, { ts: Date.now(), value: analizado });
+        } catch (err) {
+          log('warn', 'audio', 'No se pudo leer el manifiesto para buscar la pista de audio', {
+            url: maestro.url,
+            motivo: errorMessage(err)
+          });
+          continue;
+        }
+      }
+      for (const v of analizado.variants) {
+        if (v.audioOnly) extra.push(v);
+      }
+    }
+
+    if (!extra.length) return media;
+    log('info', 'audio', 'Pistas de audio encontradas en el manifiesto', {
+      cuantas: extra.length,
+      kbps: extra.map((v) => Math.round((v.bitrate || bitrateDeAudio(v.url)) / 1000)).sort((a, b) => b - a)
+    });
+    return { ...media, variants: variantes.concat(extra) };
+  }
+
   /**
    * Decide qué variantes usar y en qué orden (la primera es la elegida; el resto
    * sirven como respaldo de menor calidad).
@@ -1052,15 +1110,48 @@
     const progressive = all.filter((v) => v.kind === 'video');
     const audioOnly = all.filter((v) => v.kind === 'audio');
     const hls = all.filter((v) => v.kind === 'hls');
+    const hlsAudio = hls
+      .filter((v) => v.audioOnly)
+      .map((v) => ({ ...v, bitrate: v.bitrate || bitrateDeAudio(v.url) }))
+      .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
     const notices = [];
     const fmt = cfg.format;
 
     let pool = null;
 
-    if (fmt === 'm4a') {
+    // --- Solo audio (M4A o MP3) -------------------------------------------
+    if (fmt === 'm4a' || fmt === 'mp3') {
+      // 1) La vía buena en X: la pista AAC suelta del HLS (128 kbps, sin recomprimir).
+      if (hlsAudio.length) {
+        return {
+          ordered: [],
+          hls: null,
+          audio: { variant: hlsAudio[0], formato: fmt, kbps: hlsAudio[0].bitrate ? Math.round(hlsAudio[0].bitrate / 1000) : 128 },
+          notice: notices.join(' ') || null,
+          error: null
+        };
+      }
+
+      // 2) Una pista de audio progresiva (otros sitios): se descarga tal cual, y
+      //    si se pide MP3 se convierte a partir de esos bytes.
       if (audioOnly.length) {
-        pool = audioOnly;
-      } else if (cfg.audioFallback === 'mp4') {
+        const mejor = audioOnly.slice().sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0];
+        return {
+          ordered: [],
+          hls: null,
+          audio: {
+            variant: mejor,
+            formato: fmt,
+            kbps: mejor.bitrate ? Math.round(mejor.bitrate / 1000) : 128,
+            directo: true
+          },
+          notice: notices.join(' ') || null,
+          error: null
+        };
+      }
+
+      // 3) Respaldo: el MP4 completo (solo tiene sentido para M4A).
+      if (fmt === 'm4a' && cfg.audioFallback === 'mp4') {
         const mp4s = progressive.filter((v) => v.ext === 'mp4');
         if (mp4s.length) {
           pool = mp4s;
@@ -1069,10 +1160,12 @@
           );
         }
       }
+
       if (!pool) {
         return {
           error:
-            'No se pudo obtener el audio: este video no incluye una variante de audio independiente y la conversión no está disponible.'
+            'No se pudo obtener solo el audio: este video no publica una pista de audio independiente. ' +
+            'Prueba con el formato MP4 (el archivo incluye el audio).'
         };
       }
     } else if (fmt === 'webm') {
@@ -1536,7 +1629,8 @@
     });
 
     try {
-      const media = await resolveMediaWithRetry(video);
+      const mediaBase = await resolveMediaWithRetry(video);
+      const media = await completarRenditionsDeAudio(mediaBase);
       const plan = planDownload(media);
 
       if (plan.error) {
@@ -1545,6 +1639,16 @@
       }
 
       const context = getTweetContext(video);
+
+      if (plan.audio) {
+        log('info', 'audio', 'Modo solo audio', {
+          formato: plan.audio.formato,
+          kbps: plan.audio.kbps,
+          via: plan.audio.directo ? 'pista progresiva' : 'pista del HLS'
+        });
+        await descargarSoloAudio(plan, media, context, button);
+        return;
+      }
 
       if (plan.hls) {
         log('warn', 'video', 'Solo hay stream HLS: se intenta reconstruir', {
@@ -1692,6 +1796,70 @@
     return { initSegment, encrypted, isFmp4, segments };
   }
 
+  /**
+   * Descarga un stream HLS y devuelve sus bytes ya unidos, sin guardarlos.
+   * Lo usan la reconstrucción de vídeo y la descarga de solo audio.
+   */
+  async function construirDesdeHls(hlsVariant, onProgress, limites) {
+    const maxSegmentos = (limites && limites.maxSegmentos) || 4000;
+    const maxBytes = (limites && limites.maxBytes) || 700 * 1024 * 1024;
+
+    let playlistUrl = hlsVariant.url;
+    let playlistText = await fetchText(playlistUrl);
+
+    if (playlistText.includes('#EXT-X-STREAM-INF')) {
+      const master = parseMasterPlaylist(playlistText, playlistUrl);
+      const mejores = master.streams
+        .slice()
+        .sort((a, b) => b.height - a.height || b.bandwidth - a.bandwidth);
+      if (!mejores.length) throw new Error('El stream HLS no contiene ninguna variante reproducible.');
+      playlistUrl = mejores[0].url;
+      playlistText = await fetchText(playlistUrl);
+    }
+
+    const playlist = parseMediaPlaylist(playlistText, playlistUrl);
+    if (playlist.encrypted) {
+      throw new Error('El stream HLS está cifrado y no se puede reconstruir desde la extensión.');
+    }
+    if (!playlist.segments.length) {
+      throw new Error('No se encontraron segmentos en el stream HLS.');
+    }
+    if (playlist.segments.length > maxSegmentos) {
+      throw new Error('El stream es demasiado largo para reconstruirlo en memoria.');
+    }
+
+    const partes = [];
+    let totalBytes = 0;
+
+    if (playlist.initSegment) {
+      const res = await fetch(playlist.initSegment, { credentials: 'omit' });
+      if (!res.ok) throw new Error('No se pudo descargar el segmento inicial del stream.');
+      const buffer = await res.arrayBuffer();
+      partes.push(buffer);
+      totalBytes += buffer.byteLength;
+    }
+
+    const total = playlist.segments.length;
+    for (let i = 0; i < total; i++) {
+      const res = await fetch(playlist.segments[i], { credentials: 'omit' });
+      if (!res.ok) throw new Error('Falló la descarga del segmento ' + (i + 1) + ' de ' + total + '.');
+      const buffer = await res.arrayBuffer();
+      partes.push(buffer);
+      totalBytes += buffer.byteLength;
+      if (totalBytes > maxBytes) {
+        throw new Error('El archivo es demasiado grande para reconstruirlo en memoria.');
+      }
+      if (onProgress) onProgress(i + 1, total);
+    }
+
+    return {
+      bytes: new Uint8Array(await new Blob(partes).arrayBuffer()),
+      esFmp4: playlist.isFmp4,
+      totalBytes,
+      segmentos: total
+    };
+  }
+
   async function downloadHlsStream(hlsVariant, media, context) {
     const progress = toast('Analizando el stream HLS…', 'info', 60000);
 
@@ -1703,82 +1871,223 @@
     };
 
     try {
-      let playlistUrl = hlsVariant.url;
-      let playlistText = await fetchText(playlistUrl);
-
-      if (playlistText.includes('#EXT-X-STREAM-INF')) {
-        const master = parseMasterPlaylist(playlistText, playlistUrl);
-        const best = master.streams.sort((a, b) => b.height - a.height || b.bandwidth - a.bandwidth)[0];
-        if (!best) throw new Error('El stream HLS no contiene ninguna variante reproducible.');
-        playlistUrl = best.url;
-        playlistText = await fetchText(playlistUrl);
-      }
-
-      const playlist = parseMediaPlaylist(playlistText, playlistUrl);
-      if (playlist.encrypted) {
-        throw new Error('El stream HLS está cifrado y no se puede reconstruir desde la extensión.');
-      }
-      if (!playlist.segments.length) {
-        throw new Error('No se encontraron segmentos en el stream HLS.');
-      }
-      if (playlist.segments.length > 4000) {
-        throw new Error('El stream HLS es demasiado largo para reconstruirlo en memoria.');
-      }
-
-      const parts = [];
-      let totalBytes = 0;
-      const MAX_BYTES = 700 * 1024 * 1024;
-
-      if (playlist.initSegment) {
-        const res = await fetch(playlist.initSegment, { credentials: 'omit' });
-        if (!res.ok) throw new Error('No se pudo descargar el segmento inicial del stream.');
-        const buffer = await res.arrayBuffer();
-        parts.push(buffer);
-        totalBytes += buffer.byteLength;
-      }
-
-      const total = playlist.segments.length;
-      for (let i = 0; i < total; i++) {
-        const res = await fetch(playlist.segments[i], { credentials: 'omit' });
-        if (!res.ok) throw new Error('Falló la descarga del segmento ' + (i + 1) + ' de ' + total + '.');
-        const buffer = await res.arrayBuffer();
-        parts.push(buffer);
-        totalBytes += buffer.byteLength;
-        if (totalBytes > MAX_BYTES) {
-          throw new Error('El video es demasiado grande para reconstruirlo en memoria.');
+      const construido = await construirDesdeHls(hlsVariant, (hecho, total) => {
+        if (hecho % 10 === 0 || hecho === total) {
+          update('Descargando stream: ' + hecho + '/' + total + ' segmentos…');
         }
-        if (i % 10 === 0 || i === total - 1) {
-          update('Descargando stream: ' + (i + 1) + '/' + total + ' segmentos…');
-        }
-      }
+      });
 
-      const type = playlist.isFmp4 ? 'video/mp4' : 'video/mp2t';
-      const ext = playlist.isFmp4 ? 'mp4' : 'ts';
-      const blob = new Blob(parts, { type });
+      const type = construido.esFmp4 ? 'video/mp4' : 'video/mp2t';
+      const ext = construido.esFmp4 ? 'mp4' : 'ts';
       const variant = { ...hlsVariant, ext, height: hlsVariant.height || 0 };
-      const filename = buildFilename(media, variant, context, playlist.isFmp4 ? '' : 'hls');
+      const filename = buildFilename(media, variant, context, construido.esFmp4 ? '' : 'hls');
 
-      const objectUrl = URL.createObjectURL(blob);
-      const anchor = document.createElement('a');
-      anchor.href = objectUrl;
-      anchor.download = filename.split('/').pop();
-      anchor.style.display = 'none';
-      (document.body || document.documentElement).appendChild(anchor);
-      anchor.click();
-      setTimeout(() => {
-        anchor.remove();
-        URL.revokeObjectURL(objectUrl);
-      }, 60000);
+      descargarBlobEnLaPagina(new Blob([construido.bytes], { type }), filename.split('/').pop());
+
+      log('info', 'video', 'Stream HLS reconstruido', {
+        archivo: filename,
+        segmentos: construido.segmentos,
+        kb: Math.round(construido.totalBytes / 1024)
+      });
 
       if (progress) {
-        update('Stream reconstruido: ' + filename + (playlist.isFmp4 ? '' : ' (contenedor MPEG-TS)'));
+        update('Stream reconstruido: ' + filename + (construido.esFmp4 ? '' : ' (contenedor MPEG-TS)'));
         setTimeout(() => progress.remove(), 6000);
       }
     } catch (err) {
       if (progress) progress.remove();
+      log('error', 'video', 'Fallo al reconstruir el stream HLS', { motivo: errorMessage(err) });
       toast(errorMessage(err), 'error', 7000);
     }
   }
+
+  /** Descarga un Blob desde la propia página (para HLS y para respaldos). */
+  function descargarBlobEnLaPagina(blob, nombreArchivo) {
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = objectUrl;
+    anchor.download = nombreArchivo;
+    anchor.style.display = 'none';
+    (document.body || document.documentElement).appendChild(anchor);
+    anchor.click();
+    setTimeout(() => {
+      anchor.remove();
+      URL.revokeObjectURL(objectUrl);
+    }, 60000);
+  }
+
+  /* ---------------------- 9.1b Solo audio (M4A / MP3) ---------------------- */
+
+  /** Pide al service worker que inyecte el codificador MP3 (lamejs) en esta pestaña. */
+  async function prepararCodificadorMp3() {
+    if (typeof window.lamejs !== 'undefined' && window.lamejs && window.lamejs.Mp3Encoder) return true;
+    const respuesta = await sendMessage({ type: 'XVD_INJECT_LAMEJS' });
+    return !!(respuesta && respuesta.ok) && !!window.lamejs;
+  }
+
+  /** Convierte un M4A (AAC en MP4) a MP3 decodificando y recodificando. */
+  async function convertirMp3(bytes, kbps, onProgress) {
+    const listo = await prepararCodificadorMp3();
+    if (!listo) throw new Error('No se pudo preparar el codificador MP3. Prueba con el formato M4A.');
+
+    if (onProgress) onProgress('Decodificando el audio…');
+    const contexto = new OfflineAudioContext(2, 44100, 44100);
+    const copia = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+    const audio = await contexto.decodeAudioData(copia);
+
+    if (onProgress) onProgress('Convirtiendo a MP3…');
+    const a16 = (flotante) => {
+      const salida = new Int16Array(flotante.length);
+      for (let i = 0; i < flotante.length; i++) {
+        const s = Math.max(-1, Math.min(1, flotante[i]));
+        salida[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+      }
+      return salida;
+    };
+
+    const canales = Math.min(2, audio.numberOfChannels);
+    const codificador = new window.lamejs.Mp3Encoder(canales, audio.sampleRate, kbps || 128);
+    const izquierda = a16(audio.getChannelData(0));
+    const derecha = canales > 1 ? a16(audio.getChannelData(1)) : null;
+
+    const trozos = [];
+    const bloque = 1152;
+    for (let i = 0; i < izquierda.length; i += bloque) {
+      const l = izquierda.subarray(i, i + bloque);
+      const trozo =
+        canales > 1
+          ? codificador.encodeBuffer(l, derecha.subarray(i, i + bloque))
+          : codificador.encodeBuffer(l);
+      if (trozo.length) trozos.push(new Uint8Array(trozo));
+    }
+    const fin = codificador.flush();
+    if (fin.length) trozos.push(new Uint8Array(fin));
+
+    return { bytes: new Uint8Array(await new Blob(trozos).arrayBuffer()), canales, sampleRate: audio.sampleRate, duracion: audio.duration };
+  }
+
+  /**
+   * Manda los bytes a guardar al service worker.
+   *
+   * OJO: chrome.runtime.sendMessage serializa a JSON (no usa structured clone),
+   * así que un ArrayBuffer llegaría como {} y se perdería. Por eso se envía en
+   * trozos codificados en base64.
+   */
+  async function enviarBytesAGuardar(bytes, mime, filename, saveAs) {
+    const TROZO = 3 * 1024 * 1024;
+    const transferId = 'tr-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+    const total = Math.max(1, Math.ceil(bytes.length / TROZO));
+    let respuesta = null;
+
+    for (let i = 0; i < total; i++) {
+      const parte = bytes.subarray(i * TROZO, Math.min(bytes.length, (i + 1) * TROZO));
+
+      // A binario y luego a base64, por bloques pequeños para no reventar la pila.
+      let binario = '';
+      for (let j = 0; j < parte.length; j += 32768) {
+        binario += String.fromCharCode.apply(null, parte.subarray(j, Math.min(parte.length, j + 32768)));
+      }
+
+      respuesta = await sendMessage({
+        type: 'XVD_DOWNLOAD_BYTES',
+        transferId,
+        trozo: i,
+        trozos: total,
+        base64: btoa(binario),
+        mime,
+        filename,
+        saveAs,
+        ultimo: i === total - 1
+      });
+
+      if (!respuesta || !respuesta.ok) {
+        return respuesta || { ok: false, error: 'No se pudo guardar el audio.' };
+      }
+    }
+    return respuesta;
+  }
+
+  /**
+   * Descarga SOLO el audio: reconstruye la pista AAC del HLS, la convierte a MP3
+   * si se ha pedido, y la guarda con la misma carpeta y el mismo seguimiento que
+   * el resto de descargas (vía documento offscreen).
+   */
+  async function descargarSoloAudio(plan, media, context, button) {
+    const progress = toast('Preparando el audio…', 'info', 120000);
+    const update = (mensaje) => {
+      if (!progress) return;
+      const nodo = progress.querySelector('.xvd-toast__msg');
+      if (nodo) nodo.textContent = mensaje;
+    };
+
+    try {
+      const variante = plan.audio.variant;
+      let construido;
+
+      if (plan.audio.directo) {
+        // Pista de audio progresiva (otros sitios): se descarga entera.
+        update('Descargando la pista de audio…');
+        const res = await fetch(variante.url, { credentials: 'omit' });
+        if (!res.ok) throw new Error('No se pudo descargar la pista de audio (HTTP ' + res.status + ').');
+        const bytes = new Uint8Array(await res.arrayBuffer());
+        construido = { bytes, esFmp4: true, totalBytes: bytes.length, segmentos: 1 };
+      } else {
+        update('Descargando la pista de audio del stream…');
+        construido = await construirDesdeHls(
+          variante,
+          (hecho, total) => update('Descargando audio: ' + hecho + '/' + total + ' segmentos…'),
+          { maxSegmentos: 20000, maxBytes: 400 * 1024 * 1024 }
+        );
+      }
+
+      const quiereMp3 = plan.audio.formato === 'mp3';
+      let bytes = construido.bytes;
+      let mime = construido.esFmp4 ? 'audio/mp4' : 'audio/aac';
+      let ext = construido.esFmp4 ? 'm4a' : 'aac';
+
+      if (quiereMp3) {
+        const convertido = await convertirMp3(construido.bytes, plan.audio.kbps, update);
+        bytes = convertido.bytes;
+        mime = 'audio/mpeg';
+        ext = 'mp3';
+        log('info', 'audio', 'Audio convertido a MP3', {
+          kb: Math.round(bytes.length / 1024),
+          kbps: plan.audio.kbps,
+          hz: convertido.sampleRate,
+          canales: convertido.canales,
+          segundos: Math.round(convertido.duracion * 10) / 10
+        });
+      }
+
+      const varianteArchivo = { ...variante, ext, height: 0, bitrate: plan.audio.kbps ? plan.audio.kbps * 1000 : variante.bitrate };
+      const filename = buildFilename(media, varianteArchivo, context);
+
+      update('Guardando el archivo…');
+      const respuesta = await enviarBytesAGuardar(bytes, mime, filename, !!settings.askWhereToSave);
+
+      if (!respuesta || !respuesta.ok) {
+        throw new Error(respuesta && respuesta.error ? respuesta.error : 'No se pudo guardar el audio.');
+      }
+
+      pendingDownloads.set(respuesta.downloadId, { filename, label: filename, onInterrupted: null });
+      log('info', 'audio', 'Solo audio solicitado a chrome.downloads', {
+        archivo: filename,
+        formato: ext,
+        kb: Math.round(bytes.length / 1024),
+        segmentos: construido.segmentos
+      });
+
+      if (progress) progress.remove();
+      toast('Descarga iniciada: ' + filename, 'success', 4500);
+      setButtonState(button, 'done', ext === 'mp3' ? 'MP3' : 'M4A');
+    } catch (err) {
+      if (progress) progress.remove();
+      log('error', 'audio', 'Fallo al descargar solo el audio', { mensaje: errorMessage(err) });
+      toast(errorMessage(err), 'error', 8000);
+      setButtonState(button, 'error', 'Sin audio');
+    }
+  }
+
 
   /* ---------------------- 9.2 Avisos del background ---------------------- */
 
@@ -1975,6 +2284,7 @@
       mergeVariants,
       planDownload,
       variantScore,
+      bitrateDeAudio,
       buildFilename,
       sanitizeFolder,
       parseMasterPlaylist,
