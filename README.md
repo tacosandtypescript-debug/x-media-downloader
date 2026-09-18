@@ -109,6 +109,41 @@ duración y ruta del archivo descargado).
 
 ---
 
+## Actualizar la extensión (botón «Actualizar X media»)
+
+Actualizar una extensión desempaquetada necesita **dos pasos**, y no es una limitación de esta
+extensión sino de Chrome:
+
+> **Chrome prohíbe que una extensión lea o escriba sus propios archivos.** Puede recargarse (el botón
+> ↻ de `chrome://extensions`), pero no puede descargar y sustituir su propio código: si pudiera, sería
+> un vector de ataque evidente. Tampoco sirve `chrome.runtime.reload()` desde el popup: en las
+> pruebas deja la extensión sin volver, así que **no se usa**.
+
+El flujo es este:
+
+1. **Doble clic en `Actualizar X media`** (escritorio). Descarga la última versión desde GitHub,
+   sustituye los archivos de la carpeta de la extensión y abre `chrome://extensions`.
+2. **Pulsa ↻ (Actualizar)** en la tarjeta «Descargador de medios para X». Las pestañas de X abiertas
+   **se recargan solas** para aplicar el código nuevo (lo hace el *vigilante de contexto* de
+   `content.js`, que detecta que la extensión se recargó).
+
+La extensión te avisa cuando hay algo pendiente, sin que tengas que acordarte:
+
+- **Insignia `NEW`** en el icono de la barra de herramientas.
+- En el popup, pestaña **General** → **Versión y actualización**: compara la versión *en marcha* con
+  la que hay *en disco* y, si hay una nueva, lo dice y el botón **«Actualizar extensión»** abre
+  `chrome://extensions` para que pulses ↻.
+
+El script `actualizar.ps1` también se puede ejecutar a mano:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File actualizar.ps1 -Destino "C:\ruta\a\la\extension"
+```
+
+Y si prefieres hacerlo a mano, siempre vale lo de siempre: copiar los archivos y pulsar ↻.
+
+---
+
 ## Uso
 
 ### Descargar un video

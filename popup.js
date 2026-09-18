@@ -335,6 +335,43 @@ async function renderDiagnostico() {
 }
 
 /* =======================================================================
+ * Versión y actualización
+ * ===================================================================== */
+
+/** Versión del manifest.json que hay AHORA MISMO en la carpeta de la extensión. */
+async function versionEnDisco() {
+  try {
+    const respuesta = await fetch(chrome.runtime.getURL('manifest.json'), { cache: 'no-store' });
+    const manifiesto = await respuesta.json();
+    return String(manifiesto.version || '');
+  } catch (_) {
+    return '';
+  }
+}
+
+async function renderVersion() {
+  if (!elements.updateInfo) return { enMarcha: '', disco: '', hay: false };
+  const enMarcha = chrome.runtime.getManifest().version;
+  const disco = await versionEnDisco();
+  const hay = !!disco && disco !== enMarcha;
+
+  elements.updateInfo.innerHTML = hay
+    ? 'En marcha: <strong>' + enMarcha + '</strong> · en disco: <strong>' + disco + '</strong><br />' +
+      '<strong>Hay una versión nueva preparada.</strong> Pulsa «Actualizar extensión» para aplicarla.'
+    : 'En marcha: <strong>' + enMarcha + '</strong> · en disco: <strong>' + (disco || enMarcha) + '</strong><br />' +
+      'Estás en la última versión.';
+  elements.updateApply.textContent = hay ? 'Actualizar a la ' + disco : 'Actualizar extensión';
+  elements.updateApply.classList.toggle('xvd-btn--destacado', hay);
+
+  try {
+    chrome.action.setBadgeText({ text: hay ? 'NEW' : '' });
+  } catch (_) {
+    /* sin barra de herramientas */
+  }
+  return { enMarcha, disco, hay };
+}
+
+/* =======================================================================
  * Estado de la pestaña activa
  * ===================================================================== */
 
@@ -435,12 +472,15 @@ async function init() {
   elements.generalStatus = $('generalStatus');
   elements.diagLog = $('diagLog');
   elements.diagSummary = $('diagSummary');
+  elements.updateInfo = $('updateInfo');
+  elements.updateApply = $('updateApply');
 
   const settings = await getStored(DEFAULT_SETTINGS);
   fillForm(settings);
 
   initTabs();
   activateTab(await getLocal(LAST_TAB_KEY));
+  renderVersion();
 
   document.querySelectorAll('input, select').forEach((input) => {
     input.addEventListener('change', () => {
@@ -480,6 +520,32 @@ async function init() {
       void chrome.runtime.lastError;
       if (response && !response.ok) status(response.error, 'error');
     });
+  });
+
+  // --- Versión y actualización -------------------------------------------
+  $('updateCheck').addEventListener('click', async () => {
+    const estado = await renderVersion();
+    status(estado.hay ? 'Hay una versión nueva: ' + estado.disco : 'Estás en la última versión', estado.hay ? 'error' : 'ok');
+  });
+
+  $('updateApply').addEventListener('click', async () => {
+    // NO se usa chrome.runtime.reload(): en las pruebas deja la extensión sin
+    // volver. Se abre la página de extensiones para pulsar allí ↻, que es la vía
+    // fiable, y las pestañas de X se recargan solas (vigilante de contexto).
+    let abierto = false;
+    try {
+      await chrome.tabs.create({ url: 'chrome://extensions/' });
+      abierto = true;
+    } catch (_) {
+      abierto = false;
+    }
+
+    status(
+      abierto
+        ? 'Pulsa ↻ (Actualizar) en la tarjeta de la extensión'
+        : 'Abre chrome://extensions y pulsa ↻ en la extensión',
+      abierto ? 'ok' : 'error'
+    );
   });
 
   // --- Registro de diagnóstico -------------------------------------------

@@ -814,6 +814,15 @@ html.xvd-hover-only .xvd-button[data-state="loading"] {
   background: var(--xvd-surface-2);
 }
 
+/* Botón de actualización cuando hay algo pendiente. */
+.xvd-btn--destacado {
+  background: var(--xvd-ok);
+}
+
+.xvd-btn--destacado:hover {
+  filter: brightness(1.1);
+}
+
 .xvd-save {
   flex: 1 1 auto;
   text-align: center;

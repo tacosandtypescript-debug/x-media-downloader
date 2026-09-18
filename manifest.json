@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Descargador de medios para X",
-  "version": "2.1.1",
+  "version": "2.2.0",
   "description": "Añade un botón flotante \"Descargar\" sobre los videos e imágenes de X (Twitter) para guardarlos en la máxima calidad disponible y en el formato que elijas.",
   "minimum_chrome_version": "111",
   "icons": {

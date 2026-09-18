@@ -294,6 +294,21 @@
           <p class="xvd-hint" id="generalStatus">—</p>
         </div>
 
+        <div class="xvd-card" id="updateCard">
+          <h2>Versión y actualización</h2>
+          <p class="xvd-hint" id="updateInfo">Comprobando la versión en disco…</p>
+          <div class="xvd-diag__actions">
+            <button type="button" id="updateCheck" class="xvd-btn xvd-btn--ghost">Comprobar</button>
+            <button type="button" id="updateApply" class="xvd-btn">Actualizar extensión</button>
+          </div>
+          <p class="xvd-hint">
+            «Actualizar extensión» abre <code>chrome://extensions</code>: pulsa allí el botón <strong>↻</strong>
+            de la tarjeta. Las pestañas de X se recargan solas para aplicar el código nuevo.<br />
+            Para traer la última versión desde GitHub, ejecuta antes <strong>«Actualizar X media»</strong>
+            (escritorio); esa parte Chrome no la permite desde dentro de la extensión.
+          </p>
+        </div>
+
         <div class="xvd-card">
           <h2>Registro de diagnóstico</h2>
           <p class="xvd-hint" id="diagSummary">—</p>

@@ -39,7 +39,7 @@
   const TOASTS_ID = 'xvd-toasts';
 
   /** Versión del núcleo (se muestra en el diagnóstico del popup). */
-  const coreVersion = '2.1.1';
+  const coreVersion = '2.2.0';
 
   const DEFAULT_SETTINGS = {
     /* --- General --- */
@@ -1889,11 +1889,62 @@
     scan: scheduleScan
   };
 
+  /* =======================================================================
+   * 11. Vigilante de contexto (actualizaciones de la extensión)
+   *
+   * Al recargar la extensión (botón «Actualizar extensión» del popup o el ↻ de
+   * chrome://extensions), los content scripts ya inyectados quedan HUÉRFANOS:
+   * siguen vivos en la página con el código viejo y sus llamadas a chrome.*
+   * dejan de funcionar. Aquí se detecta y se recarga la página sola, para que
+   * entre el código nuevo sin que el usuario tenga que pulsar F5.
+   * ===================================================================== */
+
+  let fallosDeContexto = 0;
+  let contextoYaRecargado = false;
+
+  function contextoInvalidado() {
+    try {
+      if (!chrome || !chrome.runtime || !chrome.runtime.id) return true;
+      const manifiesto = chrome.runtime.getManifest();
+      return !manifiesto || !manifiesto.version;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  function vigilarContexto() {
+    setInterval(() => {
+      if (contextoYaRecargado) return;
+      if (!contextoInvalidado()) {
+        fallosDeContexto = 0;
+        return;
+      }
+      // Se exigen dos fallos seguidos para no recargar por un falso positivo.
+      fallosDeContexto++;
+      if (fallosDeContexto < 2) return;
+
+      contextoYaRecargado = true;
+      try {
+        console.warn('[XVD] La extensión se actualizó: recargando la página para aplicar el código nuevo…');
+      } catch (_) {
+        /* consola no disponible */
+      }
+      setTimeout(() => {
+        try {
+          location.reload();
+        } catch (_) {
+          /* nada más que hacer */
+        }
+      }, 400);
+    }, 3000);
+  }
+
   async function boot() {
     await loadSettings();
     document.documentElement.classList.toggle('xvd-hover-only', !!settings.showOnHover);
     startObserver();
     scheduleScan();
+    vigilarContexto();
 
     log('info', 'inicio', 'Content script listo', {
       version: coreVersion,

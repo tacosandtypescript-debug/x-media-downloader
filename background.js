@@ -219,6 +219,57 @@ function notifyTab(tabId, payload) {
 }
 
 /* =======================================================================
+ * Actualizaciones: ¿hay una versión nueva en disco?
+ *
+ * Una extensión no puede reescribir sus propios archivos (Chrome lo impide por
+ * seguridad), pero SÍ puede leer su carpeta: basta con volver a leer
+ * manifest.json para saber si el código del disco es más nuevo que el que está
+ * en marcha. Cuando lo es, se pone una insignia en el icono y el popup ofrece
+ * el botón «Actualizar extensión» (chrome.runtime.reload).
+ * ===================================================================== */
+
+async function versionEnDisco() {
+  try {
+    const respuesta = await fetch(chrome.runtime.getURL('manifest.json'), { cache: 'no-store' });
+    const manifiesto = await respuesta.json();
+    return String(manifiesto.version || '');
+  } catch (_) {
+    return '';
+  }
+}
+
+async function comprobarActualizacion(motivo) {
+  const enMarcha = chrome.runtime.getManifest().version;
+  const disco = await versionEnDisco();
+  const hay = !!disco && disco !== enMarcha;
+
+  try {
+    await chrome.storage.session.set({
+      xvd_update: { enMarcha, disco, hay, motivo: motivo || '', comprobado: Date.now() }
+    });
+  } catch (_) {
+    /* sin sesión disponible */
+  }
+
+  try {
+    await chrome.action.setBadgeText({ text: hay ? 'NEW' : '' });
+    if (hay) await chrome.action.setBadgeBackgroundColor({ color: '#1d9bf0' });
+    await chrome.action.setTitle({
+      title: hay
+        ? 'Descargador de medios para X — actualización disponible (v' + disco + ')'
+        : 'Descargador de medios para X'
+    });
+  } catch (_) {
+    /* la barra de herramientas no está disponible */
+  }
+
+  if (hay) {
+    bgLog('warn', 'actualizacion', 'Hay una versión nueva en disco', { enMarcha, disco, motivo: motivo || '' });
+  }
+  return { enMarcha, disco, hay };
+}
+
+/* =======================================================================
  * Mensajería interna: content script y popup
  * ===================================================================== */
 
@@ -250,6 +301,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .remove(LOG_KEY)
       .then(() => sendResponse({ ok: true }))
       .catch(() => sendResponse({ ok: false }));
+    return true;
+  }
+
+  if (message.type === 'XVD_COMPROBAR_ACTUALIZACION') {
+    comprobarActualizacion('popup')
+      .then((resultado) => sendResponse({ ok: true, ...resultado }))
+      .catch((error) => sendResponse({ ok: false, error: String(error) }));
+    return true;
+  }
+
+  if (message.type === 'XVD_APLICAR_ACTUALIZACION') {
+    // No se recarga la extensión desde aquí: chrome.runtime.reload() deja la
+    // extensión sin volver (comprobado). La vía fiable es el botón ↻ de
+    // chrome://extensions; esto solo deja constancia en el registro.
+    bgLog('warn', 'actualizacion', 'Actualización solicitada desde el popup', {
+      enMarcha: chrome.runtime.getManifest().version
+    });
+    sendResponse({ ok: true, recargaDesdeAqui: false });
     return true;
   }
 
@@ -388,6 +457,7 @@ async function handleDownloadDelta(delta) {
       bytes,
       seconds: segundos
     });
+    comprobarActualizacion('descarga completada').catch(() => {});
     return;
   }
 
@@ -429,6 +499,10 @@ chrome.downloads.onErased.addListener((downloadId) => {
  * ===================================================================== */
 
 chrome.runtime.onInstalled.addListener((details) => {
+  // Al cargar/cargar de nuevo la extensión se comprueba si el disco trae una
+  // versión distinta de la que acaba de arrancar (y se limpia la insignia).
+  comprobarActualizacion(details && details.reason ? details.reason : 'instalacion').catch(() => {});
+
   chrome.storage.sync.get(DEFAULT_SETTINGS, (stored) => {
     if (chrome.runtime.lastError || !stored) {
       chrome.storage.local.get(DEFAULT_SETTINGS, (local) => {
