@@ -313,6 +313,72 @@
             consigue convirtiendo el vídeo (IG no publica la pista de audio aparte), así que en MP3
             funciona siempre y en M4A se descarga el MP4 con un aviso.
           </p>
+          <label class="xvd-option xvd-option--check">
+            <input type="checkbox" id="youtubeEnabled" />
+            <span>
+              <strong>YouTube</strong>
+              <small>Botones sobre los vídeos y los Shorts de youtube.com.</small>
+            </span>
+          </label>
+          <label class="xvd-field" for="youtubeFilenameTemplate">
+            <span class="xvd-field__label">Plantilla del nombre en YouTube</span>
+            <input
+              type="text"
+              id="youtubeFilenameTemplate"
+              placeholder="youtube_{usuario}_{titulo}_{id}"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <small class="xvd-field__help">
+              Variables: <code>{usuario}</code> <code>{titulo}</code> <code>{id}</code> <code>{fecha}</code>
+              <code>{calidad}</code> <code>{ext}</code>
+            </small>
+          </label>
+          <label class="xvd-option xvd-option--check">
+            <input type="checkbox" id="youtubeCookies" />
+            <span>
+              <strong>YouTube: usar las cookies de Chrome</strong>
+              <small>Para vídeos con restricción de edad o cuando YouTube pide iniciar sesión.</small>
+            </span>
+          </label>
+          <label class="xvd-field" for="youtubeCodec">
+            <span class="xvd-field__label">YouTube: códec del vídeo</span>
+            <select id="youtubeCodec">
+              <option value="h264">H.264 — se ve en cualquier reproductor (recomendado)</option>
+              <option value="max">Máxima calidad (VP9/AV1, archivos más pequeños)</option>
+            </select>
+            <small class="xvd-field__help">
+              En MP4 se prefiere H.264; si eliges «máxima calidad» se baja lo mejor que ofrezca
+              YouTube aunque sea VP9 o AV1 (no todos los reproductores los abren).
+            </small>
+          </label>
+          <p class="xvd-hint">
+            <strong>YouTube va aparte:</strong> la extensión no descarga aquí, se lo pide a
+            <strong>yt-dlp</strong>, que sí sabe hacerlo (YouTube sirve el vídeo por fragmentos y con las
+            URLs firmadas). Por eso funciona la máxima calidad de verdad: hasta 4K con imagen y sonido,
+            M4A original y MP3. En el popup tienes el estado del servicio y un botón para actualizar
+            yt-dlp. Descargar vídeos de YouTube va contra sus términos de servicio salvo que sean tuyos
+            o tengas permiso.
+          </p>
+        </div>
+
+        <div class="xvd-card">
+          <h2>Servicio de yt-dlp (YouTube)</h2>
+          <p class="xvd-destino" id="ytdlpEstado" title="Estado del servicio de descargas de YouTube">
+            <span class="xvd-destino__icono" aria-hidden="true">⚙️</span>
+            <span id="ytdlpTexto">Comprobando…</span>
+          </p>
+          <div class="xvd-diag__actions">
+            <button type="button" id="ytdlpComprobar" class="xvd-btn">Comprobar</button>
+            <button type="button" id="ytdlpActualizar" class="xvd-btn xvd-btn--ghost">Actualizar yt-dlp</button>
+            <button type="button" id="ytdlpCarpeta" class="xvd-btn xvd-btn--ghost">Abrir Descargas</button>
+          </div>
+          <small class="xvd-field__help" id="ytdlpAyuda">
+            Las descargas de YouTube las hace <strong>yt-dlp</strong> a través de un pequeño servicio
+            local. Se instala una sola vez ejecutando <strong>«Instalar yt-dlp para X media.cmd»</strong>
+            (está junto a la extensión y en el Escritorio). No abre ningún puerto ni deja procesos
+            abiertos: Chrome solo lo arranca cuando pulsas «Descargar».
+          </small>
         </div>
 
         <div class="xvd-card">

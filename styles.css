@@ -137,6 +137,22 @@
   right: auto;
 }
 
+/* ---- YouTube ---- */
+
+/* La barra de controles ocupa la franja inferior: el botón se sube para no
+   tapar el volumen, los ajustes ni la pantalla completa. */
+.xvd-button--yt {
+  top: auto;
+  bottom: 60px;
+  right: 16px;
+}
+
+/* En Shorts la columna de acciones está a la derecha: se pasa a la izquierda. */
+.xvd-button--yt-shorts {
+  left: 12px;
+  right: auto;
+}
+
 /* ---- Contador de galería (1/4, 2/4…) ---- */
 
 .xvd-badge {
@@ -766,6 +782,13 @@ html.xvd-hover-only .xvd-button[data-state="loading"] {
   border-style: solid;
   border-color: var(--xvd-accent);
   background: var(--xvd-accent-soft);
+}
+
+/* Servicio de yt-dlp listo (verde) */
+.xvd-destino--ok {
+  border-style: solid;
+  border-color: rgba(0, 186, 124, 0.55);
+  background: rgba(0, 186, 124, 0.12);
 }
 
 .xvd-destino__icono {

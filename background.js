@@ -12,6 +12,160 @@
 
 'use strict';
 
+/* =====================================================================
+ * yt-dlp (mensajería nativa)
+ *
+ * YouTube dejó de servir URLs de archivo al reproductor (SABR + firmas), así
+ * que las descargas de YouTube las hace yt-dlp, lanzado por un host de
+ * mensajería nativa que se instala con «Instalar yt-dlp para X media.cmd».
+ * Aquí solo se hace de puente: se abre el puerto, se manda la orden y se
+ * reenvía a la pestaña todo lo que el host va contando.
+ * ===================================================================== */
+
+const YTDLP_HOST = 'com.tacosandtypescript.xvd';
+
+function mensajeDeErrorNativo(error) {
+  const texto = String((error && error.message) || error || '');
+  if (/not found|not registered|forbidden|not installed/i.test(texto)) {
+    return (
+      'El servicio de yt-dlp no está instalado. Ejecuta una vez «Instalar yt-dlp para X media.cmd» ' +
+      '(el que está en el Escritorio) y vuelve a intentarlo.'
+    );
+  }
+  return texto || 'Error desconocido del servicio de yt-dlp.';
+}
+
+/** Abre el host nativo y espera su primera respuesta definitiva. */
+function hablarConYtDlp(peticion, timeoutMs = 30000) {
+  return new Promise((resolve, reject) => {
+    let puerto;
+    try {
+      puerto = chrome.runtime.connectNative(YTDLP_HOST);
+    } catch (error) {
+      reject(new Error(mensajeDeErrorNativo(error)));
+      return;
+    }
+
+    let terminado = false;
+    const temporizador = setTimeout(
+      () => cerrar(true, new Error('El servicio de yt-dlp no respondió a tiempo.')),
+      timeoutMs
+    );
+
+    function cerrar(fallo, valor) {
+      if (terminado) return;
+      terminado = true;
+      clearTimeout(temporizador);
+      try {
+        puerto.disconnect();
+      } catch (_) {
+        /* ya estaba cerrado */
+      }
+      if (fallo) reject(valor);
+      else resolve(valor);
+    }
+
+    puerto.onMessage.addListener((mensaje) => {
+      if (!mensaje || typeof mensaje !== 'object') return;
+      if (mensaje.tipo === 'estado' || mensaje.tipo === 'fin') cerrar(false, mensaje);
+      else if (mensaje.tipo === 'error') cerrar(true, new Error(mensajeDeErrorNativo(mensaje.mensaje)));
+      else if (mensaje.tipo === 'aviso') bgLog('info', 'ytdlp', String(mensaje.mensaje || '').slice(0, 200));
+    });
+
+    puerto.onDisconnect.addListener(() => {
+      const error = chrome.runtime.lastError;
+      cerrar(true, new Error(mensajeDeErrorNativo(error ? error.message : '')));
+    });
+
+    try {
+      puerto.postMessage(peticion);
+    } catch (error) {
+      cerrar(true, new Error(mensajeDeErrorNativo(error)));
+    }
+  });
+}
+
+/** Lanza una descarga con yt-dlp y va contando el progreso a la pestaña. */
+async function lanzarDescargaConYtDlp(mensaje, sender) {
+  const tabId = sender && sender.tab && typeof sender.tab.id === 'number' ? sender.tab.id : -1;
+  const requestId = String(mensaje.requestId || '');
+
+  const avisar = (aviso) => {
+    if (tabId < 0) return;
+    chrome.tabs.sendMessage(tabId, { type: 'XVD_YTDLP', requestId, aviso }).catch(() => {
+      /* la pestaña pudo cerrarse: el host sigue y el archivo se guardará igual */
+    });
+  };
+
+  if (tabId < 0) {
+    bgLog('warn', 'youtube', 'Descarga de yt-dlp sin pestaña asociada', { requestId });
+    return;
+  }
+
+  const peticion = {
+    accion: 'descargar',
+    url: String(mensaje.url || ''),
+    id: String(mensaje.id || ''),
+    formato: ['mp4', 'webm', 'm4a', 'mp3'].indexOf(mensaje.formato) >= 0 ? mensaje.formato : 'mp4',
+    calidad: String(mensaje.calidad || 'max').slice(0, 8),
+    carpeta: String(mensaje.carpeta || '').slice(0, 200),
+    plantilla: String(mensaje.plantilla || '').slice(0, 200),
+    cookies: !!mensaje.cookies,
+    codec: mensaje.codec === 'max' ? 'max' : 'h264'
+  };
+
+  bgLog('info', 'youtube', 'Descarga de YouTube enviada a yt-dlp', {
+    formato: peticion.formato,
+    calidad: peticion.calidad,
+    carpeta: peticion.carpeta || '(Descargas)',
+    cookies: peticion.cookies
+  });
+
+  let puerto;
+  try {
+    puerto = chrome.runtime.connectNative(YTDLP_HOST);
+  } catch (error) {
+    avisar({ tipo: 'error', mensaje: mensajeDeErrorNativo(error) });
+    return;
+  }
+
+  let terminado = false;
+
+  puerto.onMessage.addListener((respuesta) => {
+    if (!respuesta || typeof respuesta !== 'object') return;
+    if (respuesta.tipo === 'fin') {
+      terminado = true;
+      bgLog(respuesta.ok ? 'info' : 'error', 'youtube', respuesta.ok ? 'yt-dlp terminó la descarga' : 'yt-dlp no pudo descargar', {
+        archivo: respuesta.archivo || '',
+        kb: respuesta.kb || 0,
+        codigo: respuesta.codigo,
+        motivo: respuesta.ok ? '' : String(respuesta.mensaje || '').slice(0, 200)
+      });
+    } else if (respuesta.tipo === 'error') {
+      terminado = true;
+      bgLog('error', 'youtube', 'El host de yt-dlp devolvió un error', {
+        motivo: String(respuesta.mensaje || '').slice(0, 200)
+      });
+    }
+    avisar(respuesta);
+  });
+
+  puerto.onDisconnect.addListener(() => {
+    const error = chrome.runtime.lastError;
+    if (!terminado) {
+      const texto = mensajeDeErrorNativo(error ? error.message : 'El servicio de yt-dlp se cerró antes de terminar.');
+      bgLog('error', 'youtube', 'El host de yt-dlp se desconectó', { motivo: texto });
+      avisar({ tipo: 'error', mensaje: texto });
+    }
+  });
+
+  try {
+    puerto.postMessage(peticion);
+  } catch (error) {
+    avisar({ tipo: 'error', mensaje: mensajeDeErrorNativo(error) });
+  }
+}
+
 /** Clave del registro de diagnóstico en chrome.storage.session. */
 const LOG_KEY = 'xvd_log';
 const LOG_MAX = 400;
@@ -488,6 +642,39 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       enMarcha: chrome.runtime.getManifest().version
     });
     sendResponse({ ok: true, recargaDesdeAqui: false });
+    return true;
+  }
+
+  if (message.type === 'XVD_YTDLP_ESTADO') {
+    hablarConYtDlp({ accion: 'estado' })
+      .then((estado) => sendResponse({ ok: true, estado }))
+      .catch((error) => sendResponse({ ok: false, error: String((error && error.message) || error) }));
+    return true;
+  }
+
+  if (message.type === 'XVD_YTDLP_ACTUALIZAR') {
+    hablarConYtDlp({ accion: 'actualizar' }, 15 * 60 * 1000)
+      .then((resultado) => sendResponse({ ok: true, resultado }))
+      .catch((error) => sendResponse({ ok: false, error: String((error && error.message) || error) }));
+    return true;
+  }
+
+  if (message.type === 'XVD_YTDLP_ABRIR_CARPETA') {
+    hablarConYtDlp({ accion: 'abrirCarpeta', carpeta: message.carpeta || '' })
+      .then((resultado) => sendResponse({ ok: true, resultado }))
+      .catch((error) => sendResponse({ ok: false, error: String((error && error.message) || error) }));
+    return true;
+  }
+
+  if (message.type === 'XVD_YTDLP_DESCARGAR') {
+    // Se responde enseguida y el progreso viaja aparte a la pestaña: una descarga
+    // de yt-dlp puede durar minutos y sendResponse caduca antes.
+    lanzarDescargaConYtDlp(message, sender).catch((error) => {
+      bgLog('error', 'youtube', 'Fallo al hablar con el host de yt-dlp', {
+        motivo: String((error && error.message) || error)
+      });
+    });
+    sendResponse({ ok: true });
     return true;
   }
 

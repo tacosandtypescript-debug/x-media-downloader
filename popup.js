@@ -38,6 +38,10 @@ const DEFAULT_SETTINGS = {
   instagramFilenameTemplate: 'instagram_{usuario}_{id}_{indice}',
   facebookEnabled: true,
   facebookFilenameTemplate: 'facebook_{usuario}_{id}_{indice}',
+  youtubeEnabled: true,
+  youtubeFilenameTemplate: 'youtube_{usuario}_{titulo}_{id}',
+  youtubeCodec: 'h264',
+  youtubeCookies: false,
   folderHistory: []
 };
 
@@ -232,7 +236,13 @@ function readForm() {
 
     instagramEnabled: elements.instagramEnabled.checked,
     instagramFilenameTemplate:
-      elements.instagramFilenameTemplate.value.trim() || DEFAULT_SETTINGS.instagramFilenameTemplate
+      elements.instagramFilenameTemplate.value.trim() || DEFAULT_SETTINGS.instagramFilenameTemplate,
+
+    youtubeEnabled: elements.youtubeEnabled.checked,
+    youtubeFilenameTemplate:
+      elements.youtubeFilenameTemplate.value.trim() || DEFAULT_SETTINGS.youtubeFilenameTemplate,
+    youtubeCodec: elements.youtubeCodec.value === 'max' ? 'max' : 'h264',
+    youtubeCookies: elements.youtubeCookies.checked
   };
 }
 
@@ -267,6 +277,11 @@ function fillForm(settings) {
   elements.instagramEnabled.checked = !!settings.instagramEnabled;
   elements.instagramFilenameTemplate.value =
     settings.instagramFilenameTemplate || DEFAULT_SETTINGS.instagramFilenameTemplate;
+  elements.youtubeEnabled.checked = !!settings.youtubeEnabled;
+  elements.youtubeFilenameTemplate.value =
+    settings.youtubeFilenameTemplate || DEFAULT_SETTINGS.youtubeFilenameTemplate;
+  elements.youtubeCodec.value = settings.youtubeCodec === 'max' ? 'max' : 'h264';
+  elements.youtubeCookies.checked = !!settings.youtubeCookies;
 
   syncUiState();
 }
@@ -597,6 +612,13 @@ async function init() {
   elements.facebookEnabled = $('facebookEnabled');
   elements.facebookFilenameTemplate = $('facebookFilenameTemplate');
   elements.instagramFilenameTemplate = $('instagramFilenameTemplate');
+  elements.youtubeEnabled = $('youtubeEnabled');
+  elements.youtubeFilenameTemplate = $('youtubeFilenameTemplate');
+  elements.youtubeCodec = $('youtubeCodec');
+  elements.youtubeCookies = $('youtubeCookies');
+  elements.ytdlpEstado = $('ytdlpEstado');
+  elements.ytdlpTexto = $('ytdlpTexto');
+  elements.ytdlpAyuda = $('ytdlpAyuda');
   elements.updateApply = $('updateApply');
 
   const settings = await getStored(DEFAULT_SETTINGS);
@@ -633,7 +655,8 @@ async function init() {
     elements.filenameTemplate,
     elements.imageFilenameTemplate,
     elements.instagramFilenameTemplate,
-    elements.facebookFilenameTemplate
+    elements.facebookFilenameTemplate,
+    elements.youtubeFilenameTemplate
   ].forEach((input) => {
     input.addEventListener('input', save);
   });
@@ -723,10 +746,108 @@ async function init() {
     }
   });
 
+  // --- Servicio de yt-dlp (YouTube) ---------------------------------------
+  $('ytdlpComprobar').addEventListener('click', () => comprobarYtDlp(true));
+
+  $('ytdlpActualizar').addEventListener('click', async () => {
+    status('Actualizando yt-dlp… (puede tardar un minuto)', 'ok');
+    elements.ytdlpTexto.textContent = 'Actualizando yt-dlp…';
+    try {
+      const respuesta = await new Promise((resolve) => {
+        chrome.runtime.sendMessage({ type: 'XVD_YTDLP_ACTUALIZAR' }, (r) => {
+          void chrome.runtime.lastError;
+          resolve(r || { ok: false, error: 'El servicio de yt-dlp no respondió.' });
+        });
+      });
+      if (!respuesta.ok) {
+        status(respuesta.error, 'error');
+      } else {
+        const version = (respuesta.resultado && respuesta.resultado.version) || '';
+        status(version ? 'yt-dlp actualizado a ' + version : 'yt-dlp actualizado ✓', 'ok');
+      }
+    } catch (err) {
+      status(String(err && err.message ? err.message : err), 'error');
+    }
+    await comprobarYtDlp(false);
+  });
+
+  $('ytdlpCarpeta').addEventListener('click', () => {
+    chrome.runtime.sendMessage({ type: 'XVD_YTDLP_ABRIR_CARPETA', carpeta: '' }, (respuesta) => {
+      void chrome.runtime.lastError;
+      if (!respuesta || !respuesta.ok) {
+        // Si no hay servicio instalado, al menos se abre la carpeta de Descargas.
+        try {
+          chrome.downloads.showDefaultFolder();
+        } catch (_) {
+          status('No se pudo abrir la carpeta', 'error');
+        }
+      }
+    });
+  });
+
+  comprobarYtDlp(false);
+
   updateTabStatus();
   setInterval(() => {
     if (!document.hidden) renderDiagnostico();
   }, 2500);
+}
+
+/**
+ * Comprueba el servicio de yt-dlp (host de mensajería nativa) y pinta su estado.
+ * @param {boolean} avisar  Si se ha pulsado el botón (para dar feedback).
+ */
+async function comprobarYtDlp(avisar) {
+  if (!elements.ytdlpTexto) return null;
+  elements.ytdlpTexto.textContent = 'Comprobando…';
+
+  const respuesta = await new Promise((resolve) => {
+    try {
+      chrome.runtime.sendMessage({ type: 'XVD_YTDLP_ESTADO' }, (r) => {
+        void chrome.runtime.lastError;
+        resolve(r || { ok: false, error: 'Sin respuesta del service worker.' });
+      });
+    } catch (err) {
+      resolve({ ok: false, error: String(err && err.message ? err.message : err) });
+    }
+  });
+
+  const estado = respuesta && respuesta.ok ? respuesta.estado : null;
+  const instalado = !!(estado && estado.ok);
+
+  if (instalado) {
+    elements.ytdlpEstado.classList.add('xvd-destino--ok');
+    elements.ytdlpTexto.textContent =
+      'yt-dlp ' + (estado.version || '?') + (estado.ffmpeg ? ' · ffmpeg sí' : ' · falta ffmpeg');
+    if (avisar) status('Servicio listo: yt-dlp ' + (estado.version || ''), 'ok');
+  } else {
+    elements.ytdlpEstado.classList.remove('xvd-destino--ok');
+    elements.ytdlpTexto.textContent = 'Servicio no instalado';
+    if (avisar) {
+      status('Ejecuta «Instalar yt-dlp para X media.cmd» para activar YouTube', 'error');
+    }
+  }
+
+  if (elements.ytdlpAyuda) {
+    elements.ytdlpAyuda.innerHTML = instalado
+      ? 'Descargas de YouTube en <strong>' +
+        escaparHtml(estado.descargas || 'Descargas') +
+        '</strong>. La carpeta elegida arriba se crea dentro de esa ruta. Si alguna descarga falla, ' +
+        'prueba «Actualizar yt-dlp»: YouTube cambia a menudo y yt-dlp se actualiza casi cada semana.'
+      : 'Las descargas de YouTube las hace <strong>yt-dlp</strong> a través de un pequeño servicio ' +
+        'local. Se instala una sola vez ejecutando <strong>«Instalar yt-dlp para X media.cmd»</strong> ' +
+        '(está junto a la extensión y en el Escritorio). No abre ningún puerto ni deja procesos ' +
+        'abiertos: Chrome solo lo arranca cuando pulsas «Descargar».';
+  }
+
+  return estado;
+}
+
+function escaparHtml(texto) {
+  return String(texto == null ? '' : texto)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
 document.addEventListener('DOMContentLoaded', init);

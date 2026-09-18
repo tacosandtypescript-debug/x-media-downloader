@@ -70,6 +70,10 @@
     instagramFilenameTemplate: 'instagram_{usuario}_{id}_{indice}',
     facebookEnabled: true,         // botones también en Facebook
     facebookFilenameTemplate: 'facebook_{usuario}_{id}_{indice}',
+    youtubeEnabled: true,          // botones también en YouTube
+    youtubeFilenameTemplate: 'youtube_{usuario}_{titulo}_{id}',
+    youtubeCodec: 'h264',          // h264 (compatible) | max (VP9/AV1, más calidad)
+    youtubeCookies: false,         // usar las cookies de Chrome (vídeos con restricción)
     /* --- Organización --- */
     folderHistory: []              // carpetas recordadas para elegirlas en el popup
   };
@@ -2202,6 +2206,92 @@
     toast('No se pudo descargar ' + (record && record.label ? record.label : 'el archivo') + ': ' + reason, 'error', 7000);
   }
 
+  /* ---------------------- 9.3 Descargas con yt-dlp (YouTube) -------------- */
+
+  /**
+   * YouTube dejó de servir archivos descargables al reproductor web (usa SABR y
+   * firma las URLs), así que el módulo de YouTube delega en yt-dlp a través del
+   * service worker y del host de mensajería nativa. Aquí se habla con ese host.
+   */
+  const ytdlpPendientes = new Map();
+  const YTDLP_ESPERA_MAXIMA = 30 * 60 * 1000;
+
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (!message || typeof message !== 'object' || message.type !== 'XVD_YTDLP') return undefined;
+
+    const pendiente = ytdlpPendientes.get(message.requestId);
+    if (!pendiente) return undefined;
+
+    // Cada mensaje reinicia el vigilante: mientras yt-dlp avanza, la descarga vive.
+    clearTimeout(pendiente.temporizador);
+    pendiente.temporizador = setTimeout(() => {
+      ytdlpPendientes.delete(message.requestId);
+      pendiente.resolver({ ok: false, mensaje: 'La descarga se quedó sin respuesta del servicio de yt-dlp.' });
+    }, YTDLP_ESPERA_MAXIMA);
+
+    const aviso = message.aviso || {};
+    if (aviso.tipo === 'progreso' || aviso.tipo === 'aviso' || aviso.tipo === 'inicio') {
+      try {
+        if (typeof pendiente.onAviso === 'function') pendiente.onAviso(aviso);
+      } catch (_) {
+        /* un aviso no debe romper la descarga */
+      }
+    }
+
+    if (aviso.tipo === 'fin' || aviso.tipo === 'error') {
+      clearTimeout(pendiente.temporizador);
+      ytdlpPendientes.delete(message.requestId);
+      pendiente.resolver(aviso);
+    }
+
+    sendResponse({ ok: true });
+    return true;
+  });
+
+  /** Pregunta al host nativo si yt-dlp está instalado y con qué versión. */
+  async function estadoDeYtDlp() {
+    const respuesta = await sendMessage({ type: 'XVD_YTDLP_ESTADO' });
+    if (!respuesta || !respuesta.ok) return null;
+    return respuesta.estado || null;
+  }
+
+  /**
+   * Manda una descarga al host nativo y espera al final, informando del progreso
+   * por el camino.
+   *
+   * @param {{url:string,id:string,formato:string,calidad:string,carpeta:string,plantilla:string,cookies:boolean,codec:string}} peticion
+   * @param {(aviso:{tipo:string,porcentaje?:number,total?:string,velocidad?:string,eta?:string,mensaje?:string}) => void} [onAviso]
+   */
+  async function descargarConYtDlp(peticion, onAviso) {
+    const requestId = 'yt-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+
+    return new Promise((resolve) => {
+      const terminar = (resultado) => {
+        const pendiente = ytdlpPendientes.get(requestId);
+        if (pendiente) clearTimeout(pendiente.temporizador);
+        ytdlpPendientes.delete(requestId);
+        resolve(resultado);
+      };
+
+      const temporizador = setTimeout(() => {
+        ytdlpPendientes.delete(requestId);
+        resolve({ ok: false, mensaje: 'El servicio de yt-dlp no respondió.' });
+      }, YTDLP_ESPERA_MAXIMA);
+
+      ytdlpPendientes.set(requestId, { resolver: terminar, onAviso, temporizador });
+
+      sendMessage({ type: 'XVD_YTDLP_DESCARGAR', requestId, ...peticion })
+        .then((respuesta) => {
+          if (respuesta && respuesta.ok) return;
+          terminar({
+            ok: false,
+            mensaje: (respuesta && respuesta.error) || 'No se pudo hablar con el servicio de yt-dlp.'
+          });
+        })
+        .catch((err) => terminar({ ok: false, mensaje: errorMessage(err) }));
+    });
+  }
+
   /* =======================================================================
    * 10. Núcleo compartido y arranque
    * ===================================================================== */
@@ -2249,7 +2339,10 @@
     fetchBytes,
     convertirMp3,
     guardarBytes: enviarBytesAGuardar,
-    descargarBlobEnLaPagina
+    descargarBlobEnLaPagina,
+    // yt-dlp (YouTube): mensajería nativa a través del service worker
+    estadoDeYtDlp,
+    descargarConYtDlp
   };
 
   /* =======================================================================

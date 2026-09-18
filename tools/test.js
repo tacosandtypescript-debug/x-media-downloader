@@ -164,7 +164,8 @@ function loadBridge(options) {
     setTimeout,
     clearTimeout,
     URL,
-    location: { hostname: 'x.com', pathname: '/' },
+    URLSearchParams,
+    location: opts.location || { hostname: 'x.com', pathname: '/', search: '' },
     document: {
       querySelectorAll: (selector) => (selector === 'video' ? [video] : [])
     },
@@ -175,6 +176,7 @@ function loadBridge(options) {
   sandbox.addEventListener = () => {};
   sandbox.postMessage = () => {};
   if (opts.pageState) sandbox.__INITIAL_STATE__ = opts.pageState;
+  if (opts.playerResponse) sandbox.ytInitialPlayerResponse = opts.playerResponse;
 
   const code = fs.readFileSync(path.join(ROOT, 'page-bridge.js'), 'utf8');
   vm.createContext(sandbox);
@@ -186,16 +188,37 @@ function loadBridge(options) {
 
 let passed = 0;
 const failures = [];
+const pendientes = [];
 
 function test(name, fn) {
+  let resultado;
   try {
-    fn();
-    passed++;
-    console.log('  ✓ ' + name);
+    resultado = fn();
   } catch (error) {
     failures.push({ name, error });
     console.log('  ✗ ' + name + '\n      ' + error.message);
+    return;
   }
+
+  // Hay pruebas que necesitan esperar (por ejemplo, un clic que pasa por await).
+  if (resultado && typeof resultado.then === 'function') {
+    pendientes.push(
+      resultado.then(
+        () => {
+          passed++;
+          console.log('  ✓ ' + name);
+        },
+        (error) => {
+          failures.push({ name, error });
+          console.log('  ✗ ' + name + '\n      ' + (error && error.message));
+        }
+      )
+    );
+    return;
+  }
+
+  passed++;
+  console.log('  ✓ ' + name);
 }
 
 function config(overrides) {
@@ -1210,9 +1233,294 @@ test('el historial no crece sin limite', () => {
   assert.strictEqual(historial[0], 'carpeta-59', 'la última usada es la primera');
 });
 
+/* ------------------------------------ YouTube (módulo de la página) -- */
+
+console.log('\nYouTube (módulo de la página)');
+
+/**
+ * Carga youtube.js con un núcleo y un DOM simulados. El módulo ya no descarga
+ * nada por su cuenta (eso lo hace yt-dlp a través del host nativo), así que lo
+ * que se prueba aquí es lo que sí decide: el id del vídeo, la URL canónica, la
+ * colocación del botón, la plantilla de nombre y la orden que manda al host.
+ */
+function loadYouTubeModule(opciones) {
+  const op = opciones || {};
+  const registro = { scanners: [], hooks: [], descargas: [], boton: null, avisos: [] };
+
+  const video = {
+    getBoundingClientRect: () => ({ width: op.ancho || 1280, height: op.alto || 720 }),
+    closest: (selector) => (selector === '.ytp-miniplayer' && op.mini ? {} : null)
+  };
+  const jugador = {
+    style: {},
+    dataset: {},
+    isConnected: true,
+    setAttribute() {},
+    appendChild() {},
+    querySelector: (selector) => (/video/.test(selector) ? video : null)
+  };
+
+  const core = {
+    BUTTON_CLASS: 'xvd-button',
+    HOST_ATTR: 'data-xvd-host',
+    ICONS: { download: '<svg></svg>' },
+    registerScanner: (fn) => registro.scanners.push(fn),
+    registerDisableHook: (fn) => registro.hooks.push(fn),
+    findOverlayHost: () => jugador,
+    createButton: (options) => {
+      registro.boton = options;
+      return { dataset: {}, isConnected: true, remove() {}, className: options.className };
+    },
+    setButtonState: (boton, estado, etiqueta) => {
+      registro.estadoBoton = { estado, etiqueta };
+    },
+    log: () => {},
+    toast: (mensaje, tipo) => {
+      registro.avisos.push({ mensaje, tipo });
+      return { querySelector: () => ({ textContent: '' }), remove() {} };
+    },
+    errorMessage: (e) => String((e && e.message) || e),
+    getSettings: () => ({
+      enabled: true,
+      youtubeEnabled: op.youtubeEnabled !== false,
+      youtubeFilenameTemplate: op.plantilla || 'youtube_{usuario}_{titulo}_{id}',
+      youtubeCodec: op.codec || 'h264',
+      youtubeCookies: !!op.cookies,
+      format: op.formato || 'mp4',
+      quality: op.quality || 'max',
+      minHeight: op.minHeight || 720,
+      folder: op.folder || ''
+    }),
+    sanitizeFolder: (v) => String(v || '').trim(),
+    estadoDeYtDlp: async () => ('estado' in op ? op.estado : { ok: true, version: '2026.08.19', ffmpeg: true, descargas: 'C:\\Users\\KTZ\\Downloads' }),
+    descargarConYtDlp: async (peticion, onAviso) => {
+      registro.descargas.push(peticion);
+      if (onAviso) {
+        onAviso({ tipo: 'inicio', carpeta: 'C:\\Users\\KTZ\\Downloads' });
+        onAviso({ tipo: 'progreso', porcentaje: 42.5, total: '3.29MiB', velocidad: '7.2MiB/s', eta: '00:03' });
+        onAviso({ tipo: 'aviso', mensaje: '[Merger] Merging formats into "x.mp4"' });
+      }
+      if (op.falloDescarga) return { ok: false, mensaje: op.falloDescarga };
+      return {
+        ok: true,
+        archivo: 'C:\\Users\\KTZ\\Downloads\\youtube_Canal_Video_dQw4w9WgXcQ.mp4',
+        kb: 33811,
+        carpeta: 'C:\\Users\\KTZ\\Downloads'
+      };
+    }
+  };
+
+  const sandbox = {
+    console,
+    URL,
+    URLSearchParams,
+    location: op.location || {
+      hostname: 'www.youtube.com',
+      search: '?v=dQw4w9WgXcQ',
+      pathname: '/watch',
+      origin: 'https://www.youtube.com'
+    },
+    document: {
+      querySelector: (selector) => {
+        if (/^#movie_player|#shorts-player|\.html5-video-player/.test(selector)) return jugador;
+        if (selector.indexOf('.xvd-button') === 0) return null;
+        return null;
+      },
+      querySelectorAll: () => [],
+      createElement: () => ({ style: {}, dataset: {}, appendChild() {}, setAttribute() {} })
+    },
+    module: { exports: {} }
+  };
+  sandbox.window = sandbox;
+  sandbox.globalThis = sandbox;
+  sandbox.window.__XVD_CORE__ = core;
+
+  const code = fs.readFileSync(path.join(ROOT, 'youtube.js'), 'utf8');
+  vm.createContext(sandbox);
+  vm.runInContext(code, sandbox, { filename: 'youtube.js' });
+  return { api: sandbox.module.exports, registro, jugador, core };
+}
+
+/** Ejecuta el escáner para que el módulo cree el botón y devuelve su clic. */
+async function pulsarDescargar(modulo, opciones) {
+  modulo.registro.scanners[0]();
+  const boton = { dataset: {}, isConnected: true, remove() {} };
+  if (!modulo.registro.boton) throw new Error('el módulo no creó el botón');
+  await modulo.registro.boton.onClick({}, boton);
+  return boton;
+}
+
+const yt = loadYouTubeModule({}).api;
+
+test('lee el id del vídeo de la URL (normal, Shorts e incrustado)', () => {
+  const conUrl = (search, pathname) =>
+    loadYouTubeModule({
+      location: { hostname: 'www.youtube.com', search, pathname, origin: 'https://www.youtube.com' }
+    }).api;
+
+  assert.strictEqual(conUrl('?v=dQw4w9WgXcQ&list=PL123&t=42', '/watch').idEnLaUrl(), 'dQw4w9WgXcQ');
+  assert.strictEqual(conUrl('', '/shorts/abcdefghijk').idEnLaUrl(), 'abcdefghijk');
+  assert.strictEqual(conUrl('', '/embed/zyxwvutsrqp').idEnLaUrl(), 'zyxwvutsrqp');
+  assert.strictEqual(conUrl('', '/feed/subscriptions').idEnLaUrl(), '');
+});
+
+test('construye la URL canónica sin lista ni marcas de tiempo', () => {
+  const conUrl = (search, pathname) =>
+    loadYouTubeModule({
+      location: { hostname: 'www.youtube.com', search, pathname, origin: 'https://www.youtube.com' }
+    }).api;
+
+  assert.strictEqual(
+    conUrl('?v=dQw4w9WgXcQ&list=PL123&t=42s', '/watch').urlDelVideo(),
+    'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+  );
+  assert.strictEqual(
+    conUrl('', '/shorts/abcdefghijk').urlDelVideo(),
+    'https://www.youtube.com/watch?v=abcdefghijk'
+  );
+});
+
+test('detecta Shorts para colocar el botón a la izquierda', () => {
+  const shorts = loadYouTubeModule({
+    location: {
+      hostname: 'www.youtube.com',
+      search: '',
+      pathname: '/shorts/abcdefghijk',
+      origin: 'https://www.youtube.com'
+    }
+  }).api;
+  assert.strictEqual(shorts.esShorts(), true);
+  assert.strictEqual(yt.esShorts(), false);
+});
+
+test('el botón de Shorts usa la clase de la izquierda y el normal la de la derecha', () => {
+  const normal = loadYouTubeModule({});
+  normal.registro.scanners[0]();
+  assert.strictEqual(normal.registro.boton.className, 'xvd-button--yt');
+
+  const shorts = loadYouTubeModule({
+    location: {
+      hostname: 'www.youtube.com',
+      search: '',
+      pathname: '/shorts/abcdefghijk',
+      origin: 'https://www.youtube.com'
+    }
+  });
+  shorts.registro.scanners[0]();
+  assert.ok(/xvd-button--yt-shorts/.test(shorts.registro.boton.className), shorts.registro.boton.className);
+});
+
+test('la plantilla de nombre se traduce al formato de yt-dlp', () => {
+  assert.strictEqual(
+    yt.plantillaParaYtDlp('youtube_{usuario}_{titulo}_{id}'),
+    'youtube_%(uploader)s_%(title)s_%(id)s.%(ext)s'
+  );
+  assert.strictEqual(yt.plantillaParaYtDlp('{fecha}_{id}_{calidad}'), '%(upload_date>%Y-%m-%d)s_%(id)s_%(resolution)s.%(ext)s');
+  assert.strictEqual(yt.plantillaParaYtDlp('vid_{id}.{ext}'), 'vid_%(id)s.%(ext)s');
+  assert.strictEqual(yt.plantillaParaYtDlp(''), 'youtube_%(uploader)s_%(title)s_%(id)s.%(ext)s');
+  // Nunca pueden quedar llaves sueltas ni caracteres prohibidos en Windows.
+  assert.ok(!/[{}]/.test(yt.plantillaParaYtDlp('a_{raro}_{id}')));
+  assert.ok(!/[\\/:*?"<>|]/.test(yt.plantillaParaYtDlp('con/barra:*?"<>|')));
+});
+
+test('el tiempo restante se muestra en minutos y segundos', () => {
+  assert.strictEqual(yt.formatearTiempo(0), '0:00');
+  assert.strictEqual(yt.formatearTiempo(9), '0:09');
+  assert.strictEqual(yt.formatearTiempo(75), '1:15');
+  assert.strictEqual(yt.formatearTiempo(3600), '60:00');
+  assert.strictEqual(yt.formatearTiempo('Unknown'), '0:00');
+});
+
+test('el módulo solo se activa en youtube.com y registra su escáner', () => {
+  const enYouTube = loadYouTubeModule({});
+  assert.strictEqual(enYouTube.registro.scanners.length, 1);
+  assert.strictEqual(enYouTube.registro.hooks.length, 1);
+
+  const enOtroSitio = loadYouTubeModule({
+    location: { hostname: 'x.com', search: '', pathname: '/', origin: 'https://x.com' }
+  });
+  assert.strictEqual(enOtroSitio.registro.scanners.length, 0, 'fuera de YouTube no hace nada');
+});
+
+test('al pulsar, la orden que recibe yt-dlp lleva formato, calidad, carpeta y códec', async () => {
+  const modulo = loadYouTubeModule({
+    formato: 'mp4',
+    quality: 'custom',
+    minHeight: 1080,
+    folder: 'Musica/Rick',
+    cookies: true,
+    codec: 'max',
+    plantilla: '{usuario}_{titulo}_{id}'
+  });
+
+  await pulsarDescargar(modulo);
+
+  assert.strictEqual(modulo.registro.descargas.length, 1);
+  const peticion = modulo.registro.descargas[0];
+  assert.strictEqual(peticion.url, 'https://www.youtube.com/watch?v=dQw4w9WgXcQ');
+  assert.strictEqual(peticion.id, 'dQw4w9WgXcQ');
+  assert.strictEqual(peticion.formato, 'mp4');
+  assert.strictEqual(peticion.calidad, '1080', 'la calidad personalizada se pasa en número');
+  assert.strictEqual(peticion.carpeta, 'Musica/Rick');
+  assert.strictEqual(peticion.cookies, true);
+  assert.strictEqual(peticion.codec, 'max');
+  assert.strictEqual(peticion.plantilla, '%(uploader)s_%(title)s_%(id)s.%(ext)s');
+  assert.strictEqual(modulo.registro.estadoBoton.estado, 'done');
+  assert.ok(
+    modulo.registro.avisos.some((a) => /Descarga terminada/.test(a.mensaje) && a.tipo === 'success'),
+    JSON.stringify(modulo.registro.avisos)
+  );
+});
+
+test('con calidad «max» no se manda ningún tope de resolución', async () => {
+  const modulo = loadYouTubeModule({ quality: 'max', minHeight: 480 });
+  await pulsarDescargar(modulo);
+  assert.strictEqual(modulo.registro.descargas[0].calidad, 'max');
+});
+
+test('el MP3 se pide tal cual y el códec no se toca en audio', async () => {
+  const modulo = loadYouTubeModule({ formato: 'mp3' });
+  await pulsarDescargar(modulo);
+  assert.strictEqual(modulo.registro.descargas[0].formato, 'mp3');
+  assert.strictEqual(modulo.registro.descargas[0].codec, 'h264', 'el códec solo afecta al vídeo');
+});
+
+test('si yt-dlp no está instalado, se avisa de qué hacer y no se descarga nada', async () => {
+  const modulo = loadYouTubeModule({ estado: { ok: false } });
+  await pulsarDescargar(modulo);
+
+  assert.strictEqual(modulo.registro.descargas.length, 0, 'no se llama al host si no está disponible');
+  assert.strictEqual(modulo.registro.estadoBoton.estado, 'error');
+  const error = modulo.registro.avisos.find((a) => a.tipo === 'error');
+  assert.ok(error && /Instalar yt-dlp para X media\.cmd/.test(error.mensaje), JSON.stringify(modulo.registro.avisos));
+});
+
+test('si yt-dlp falla, el motivo se muestra en español', async () => {
+  const modulo = loadYouTubeModule({ falloDescarga: 'YouTube rechazó la descarga (HTTP 403). Casi siempre es que yt-dlp está desactualizado.' });
+  await pulsarDescargar(modulo);
+
+  assert.strictEqual(modulo.registro.estadoBoton.estado, 'error');
+  const error = modulo.registro.avisos.find((a) => a.tipo === 'error');
+  assert.ok(error && /403/.test(error.mensaje), JSON.stringify(modulo.registro.avisos));
+});
+
+test('sin reproductor no se crea ningún botón', () => {
+  const modulo = loadYouTubeModule({ ancho: 100, alto: 60 });
+  modulo.registro.scanners[0]();
+  assert.strictEqual(modulo.registro.boton, null, 'un reproductor minúsculo no cuenta');
+});
+
+test('con YouTube desactivado no se crea el botón', () => {
+  const modulo = loadYouTubeModule({ youtubeEnabled: false });
+  modulo.registro.scanners[0]();
+  assert.strictEqual(modulo.registro.boton, null);
+});
+
 /* ------------------------------------------------------------------ cierre -- */
 
-console.log('\n' + passed + ' pruebas correctas, ' + failures.length + ' fallos\n');
-if (failures.length) {
-  process.exitCode = 1;
-}
+Promise.all(pendientes).then(() => {
+  console.log('\n' + passed + ' pruebas correctas, ' + failures.length + ' fallos\n');
+  if (failures.length) {
+    process.exitCode = 1;
+  }
+});

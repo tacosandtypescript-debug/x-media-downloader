@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Descargador de medios para X",
-  "version": "2.6.0",
-  "description": "Añade un botón flotante \"Descargar\" sobre los videos e imágenes de X (Twitter), Instagram y Facebook para guardarlos en la máxima calidad, con opción de solo audio (M4A/MP3).",
+  "version": "2.7.0",
+  "description": "Añade un botón flotante \"Descargar\" sobre los videos e imágenes de X (Twitter), Instagram, Facebook y YouTube para guardarlos en la máxima calidad, con opción de solo audio (M4A/MP3).",
   "minimum_chrome_version": "116",
   "icons": {
     "16": "icons/icon16.png",
@@ -26,7 +26,8 @@
     "storage",
     "activeTab",
     "scripting",
-    "offscreen"
+    "offscreen",
+    "nativeMessaging"
   ],
   "host_permissions": [
     "*://*.x.com/*",
@@ -45,7 +46,8 @@
         "*://*.twitter.com/*",
         "*://*.instagram.com/*",
         "*://*.facebook.com/*",
-        "*://*.fb.watch/*"
+        "*://*.fb.watch/*",
+        "*://*.youtube.com/*"
       ],
       "js": [
         "page-bridge.js"
@@ -60,13 +62,15 @@
         "*://*.twitter.com/*",
         "*://*.instagram.com/*",
         "*://*.facebook.com/*",
-        "*://*.fb.watch/*"
+        "*://*.fb.watch/*",
+        "*://*.youtube.com/*"
       ],
       "js": [
         "content.js",
         "images.js",
         "instagram.js",
-        "facebook.js"
+        "facebook.js",
+        "youtube.js"
       ],
       "css": [
         "styles.css"

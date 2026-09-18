@@ -1,10 +1,17 @@
 # Descargador de medios para X (Twitter)
 
 Extensión de Chrome bajo **Manifest V3** que añade un botón flotante **«Descargar»** sobre los
-**videos** y las **imágenes** publicados en X (Twitter), permitiendo guardarlos en la **máxima
-calidad o resolución disponible** y en el **formato configurable** por el usuario.
+**videos** y las **imágenes** publicados en X (Twitter), **Instagram**, **Facebook** y **YouTube**,
+permitiendo guardarlos en la **máxima calidad o resolución disponible** y en el **formato
+configurable** por el usuario (MP4, WebM, M4A o MP3), con **carpetas de destino** y plantillas de
+nombre.
 
 Toda la interfaz (botones, avisos y popup de opciones) está **en español**.
+
+> X, Instagram y Facebook se descargan dentro de la extensión. **YouTube va aparte**: YouTube dejó de
+> entregar archivos descargables al navegador (usa SABR y firma las URLs), así que esa descarga la
+> hace **yt-dlp** mediante un pequeño servicio local que se instala una vez. Ver
+> [YouTube](#youtube-a-través-de-yt-dlp).
 
 ---
 
@@ -17,11 +24,12 @@ Toda la interfaz (botones, avisos y popup de opciones) está **en español**.
 5. [Arquitectura y archivos](#arquitectura-y-archivos)
 6. [Cómo obtiene la URL del video](#cómo-obtiene-la-url-del-video)
 7. [Cómo obtiene la imagen en máxima resolución](#cómo-obtiene-la-imagen-en-máxima-resolución)
-8. [Permisos y privacidad](#permisos-y-privacidad)
-9. [Limitaciones conocidas](#limitaciones-conocidas)
-10. [Solución de problemas](#solución-de-problemas)
-11. [Desarrollo](#desarrollo)
-12. [Criterios de aceptación](#criterios-de-aceptación)
+8. [YouTube y el servicio de yt-dlp](#youtube-a-través-de-yt-dlp)
+9. [Permisos y privacidad](#permisos-y-privacidad)
+10. [Limitaciones conocidas](#limitaciones-conocidas)
+11. [Solución de problemas](#solución-de-problemas)
+12. [Desarrollo](#desarrollo)
+13. [Criterios de aceptación](#criterios-de-aceptación)
 
 ---
 
@@ -84,6 +92,47 @@ remultiplexar (un muxer o ffmpeg), que la extensión no incluye. Para el audio e
 **Igual que en Instagram:** Facebook exige sesión para casi todo, así que **esta parte la pruebas tú**;
 si algo falla, popup → **General** → **Copiar informe** y me lo pasas.
 
+### YouTube (a través de yt-dlp)
+
+- **Vídeos, Shorts y el minirreproductor no** (los Shorts llevan el botón a la izquierda para no
+  tapar la columna de acciones).
+- **Máxima calidad de verdad**: hasta 4K con imagen y sonido, no el 720p de los MP4 progresivos.
+- **M4A original** (pista AAC de YouTube, **sin recomprimir**) y **MP3** recodificado con ffmpeg.
+- **Códec a elegir**: H.264 (se ve en cualquier reproductor, opción por defecto) o lo mejor que
+  ofrezca YouTube aunque sea VP9/AV1.
+- **Cookies de Chrome** como opción, para vídeos con restricción de edad o cuando YouTube pide
+  iniciar sesión.
+- **Progreso en directo** sobre el propio vídeo: porcentaje, tamaño, velocidad y tiempo restante, y
+  los avisos de yt-dlp traducidos al español (403 → «actualiza yt-dlp», «pide iniciar sesión» → activa
+  las cookies, etc.).
+
+**Cómo funciona (y por qué así).** La extensión **no descarga YouTube**: le pasa el trabajo a
+**yt-dlp**, que se instala una sola vez en tu equipo con `Instalar yt-dlp para X media.cmd`. El motivo
+está medido contra YouTube real (septiembre de 2026):
+
+- El reproductor web ya **no recibe URLs de archivo**. Usa **SABR** (`serverAbrStreamingUrl`, con
+  respuestas `application/vnd.yt-ump`) y los formatos adaptativos llegan **sin `url` y sin
+  `signatureCipher`**; el único progresivo (itag 18) llega **cifrado**.
+- Reutilizar las URLs que pide el reproductor **no sirve**: la de SABR contesta `sabr.malformed` (31
+  bytes) o **403** si se le añaden `itag=`/`range=`, y la ruta `/videoplayback/<itag>` también da 403.
+- Los clientes de Innertube (ANDROID/IOS/WEB) contestan **400 / UNPLAYABLE**: exigen la versión de
+  cliente y el *po_token* actuales, que cambian cada pocas semanas.
+
+Descifrar firmas e implementar UMP/SABR dentro de una extensión es, literalmente, reescribir yt-dlp
+(por eso yt-dlp se actualiza casi a diario). Así que se usa yt-dlp: la extensión solo pone el botón,
+recoge tus ajustes y **lanza y muestra** la descarga.
+
+**El servicio local** es un *host de mensajería nativa* de Chrome: un ejecutable de 24 KB
+(`native/ytdlp-host.cs`, compilado por el instalador) que Chrome arranca únicamente cuando pulsas
+«Descargar» y que termina al acabar. **No abre puertos, no deja procesos en segundo plano y no pide
+permisos de administrador**: el instalador escribe el manifiesto en `%LOCALAPPDATA%\XVD-YTDLP` y lo
+registra en tu usuario (Chrome, Chromium y Edge).
+
+> **Aviso honesto:** descargar vídeos de YouTube va contra sus [términos de servicio](https://www.youtube.com/t/terms)
+> salvo que el contenido sea tuyo o tengas permiso. Esta función es para eso: tus vídeos, material
+> con licencia libre o descargas que YouTube permite. Por el mismo motivo, una extensión así no
+> pasaría la revisión de la Chrome Web Store.
+
 ### Comunes
 
 - **Botones flotantes** con el estilo visual de X, que no bloquean ni modifican los controles
@@ -91,8 +140,9 @@ si algo falla, popup → **General** → **Copiar informe** y me lo pasas.
   se desplaza a la esquina inferior derecha para no tapar los controles de X).
 - **Organización por carpetas**: elige o crea la carpeta de destino desde el popup y todo lo que
   descargues se guarda ahí. Ver «Organización por carpetas» más abajo.
-- **Plantillas de nombre de archivo** independientes para X (vídeo e imagen), Instagram y Facebook.
-- **Interruptor on/off** general y otros por sitio (imágenes, Instagram, Facebook).
+- **Plantillas de nombre de archivo** independientes para X (vídeo e imagen), Instagram, Facebook y
+  YouTube.
+- **Interruptor on/off** general y otros por sitio (imágenes, Instagram, Facebook, YouTube).
 - **Avisos en español** dentro de la propia página: progreso, éxito y errores claros.
 
 ---
@@ -169,6 +219,9 @@ limitar la cuenta.
    puzle si quieres tener el popup a mano.
 7. Abre o **recarga** `https://x.com/` (las pestañas abiertas antes de instalar no tienen los
    content scripts; el popup intenta inyectarlos, pero una recarga es lo más fiable).
+8. **Solo para YouTube**: ejecuta una vez **`Instalar yt-dlp para X media.cmd`** (doble clic). Compila
+   e instala el servicio local de descargas. No hace falta para X, Instagram ni Facebook, y no
+   necesita permisos de administrador.
 
 > Navegadores compatibles: Chrome 102 o superior, Edge, Brave y cualquier derivado de Chromium con
 > soporte de Manifest V3. En Firefox MV3 el service worker es parcialmente distinto y no está
@@ -309,19 +362,27 @@ x-video-downloader/
 ├── images.js            Módulo de IMÁGENES de X (se carga después de content.js)
 ├── instagram.js         Módulo de INSTAGRAM (fotos, carruseles, reels)
 ├── facebook.js          Módulo de FACEBOOK (vídeo, reels, fotos y audio del DASH)
-├── background.js        Service worker: valida, ejecuta y vigila las descargas
+├── youtube.js           Módulo de YOUTUBE (delega la descarga en yt-dlp)
+├── background.js        Service worker: descargas, registro y puente con el host nativo
 ├── popup.html           Popup con pestañas Videos | Imágenes | General
 ├── popup.js             Lógica del popup (chrome.storage.sync)
 ├── styles.css           Estilos: botones, contadores, avisos y popup (una sola hoja)
+├── folders.js           Saneado y memoria de carpetas de destino (compartido con el popup)
+├── instalar-ytdlp.ps1   Instalador del servicio de yt-dlp (solo YouTube)
+├── Instalar yt-dlp para X media.cmd   Lanzador del instalador (doble clic)
+├── native/
+│   └── ytdlp-host.cs    Host de mensajería nativa: ejecuta yt-dlp y cuenta el progreso
 ├── icons/
 │   ├── icon16.png       Icono de barra
 │   ├── icon48.png       Icono de gestión de extensiones
 │   └── icon128.png      Icono de instalación / Chrome Web Store
 ├── tools/
 │   ├── make-icons.js    Generador de iconos sin dependencias (opcional)
-│   ├── test.js          Pruebas de la lógica pura (71 comprobaciones)
+│   ├── test.js          Pruebas de la lógica pura (94 comprobaciones)
 │   ├── check-popup.js   Comprobación de coherencia popup.html ↔ popup.js
-│   ├── e2e-test.py      Prueba end-to-end en un Chromium real (58 comprobaciones)
+│   ├── test-host.js     Prueba del host nativo sin Chrome (protocolo y descargas reales)
+│   ├── e2e-test.py      Prueba end-to-end de X, Instagram y Facebook (66 comprobaciones)
+│   ├── e2e-youtube.py   Prueba end-to-end de YouTube con red real y ffprobe (23 comprobaciones)
 │   ├── build-audio-test.js  Une la pista de audio de un HLS a un M4A (para pruebas)
 │   └── fixtures/
 │       └── tweet-video-2100475914182107353.json   Tweet real usado como fixture
@@ -577,12 +638,16 @@ segundos por combinación de imagen + resolución + formato.
 | `storage` | Guardar las preferencias (`chrome.storage.sync`, respaldo local y de sesión). |
 | `activeTab` | Inyectar los content scripts bajo demanda si la pestaña ya estaba abierta. |
 | `scripting` | Reinyectar `content.js`/`images.js`/`styles.css` en pestañas de X abiertas antes de instalar. |
-| `host_permissions` | X (`x.com`, `twitter.com`, `pbs.twimg.com`), Instagram (`instagram.com`, `cdninstagram.com`) y Facebook (`facebook.com`, `fb.watch`). `fbcdn.net` lo comparten IG y FB. |
+| `nativeMessaging` | **Solo YouTube**: hablar con el servicio local de yt-dlp (`native/ytdlp-host.cs`) para lanzar la descarga y recibir el progreso. Sin ese servicio instalado no se usa para nada. |
+| `host_permissions` | X (`x.com`, `twitter.com`, `pbs.twimg.com`), Instagram (`instagram.com`, `cdninstagram.com`) y Facebook (`facebook.com`, `fb.watch`). `fbcdn.net` lo comparten IG y FB. **YouTube no está**: no se hace ninguna petición desde la extensión, solo se le pasa la URL a yt-dlp. |
 
 - **No** se recopila, envía ni analiza ningún dato. No hay servidores propios ni telemetría.
 - **No** se solicitan permisos amplios (`<all_urls>`, `webRequest`, `tabs`, `cookies`…).
-- Los archivos se descargan directamente desde el CDN de X (`video.twimg.com`, `pbs.twimg.com`);
-  la extensión no actúa como intermediario.
+- Los archivos de X, Instagram y Facebook se descargan directamente desde su CDN; la extensión no
+  actúa como intermediario.
+- El servicio de yt-dlp (solo YouTube) se ejecuta en tu equipo, con tus ajustes, y escribe en tu
+  carpeta de Descargas: **nada sale a ningún servidor que no sea el propio YouTube**. Se instala en
+  `%LOCALAPPDATA%\XVD-YTDLP` y se puede quitar con `Instalar yt-dlp para X media.cmd quitar`.
 
 ---
 
@@ -622,6 +687,21 @@ segundos por combinación de imagen + resolución + formato.
 - **Cambios de X.** El código usa selectores y rutas resilientes, pero una reescritura profunda del
   frontend puede requerir ajustes.
 
+### YouTube
+
+- **Necesita yt-dlp instalado** (una vez, con `Instalar yt-dlp para X media.cmd`). Sin él, el popup lo
+  dice y el botón avisa en vez de fallar en silencio.
+- **Mantenlo actualizado.** YouTube cambia a menudo y yt-dlp se actualiza casi cada semana: si algo
+  falla con un **403**, pulsa «Actualizar yt-dlp» en el popup (o vuelve a ejecutar el instalador).
+- **MP3 y unir imagen con sonido necesitan ffmpeg.** Para M4A no hace falta.
+- **Vídeos privados, solo para miembros, o con bloqueo regional:** no se pueden descargar (yt-dlp
+  tampoco puede). Con restricción de edad o «confirma que no eres un robot», activa **«Usar las
+  cookies de Chrome»** en el popup.
+- **Listas de reproducción:** se descarga **solo el vídeo abierto** (`--no-playlist`), a propósito.
+- **Vídeos en directo:** yt-dlp los graba mientras se emiten, pero desde el botón se comporta como una
+  descarga normal; si es un directo en curso puede tardar o fallar.
+- **Es la única parte que sale del navegador:** el resto de sitios se descargan dentro de la extensión.
+
 ---
 
 ## Solución de problemas
@@ -641,6 +721,12 @@ segundos por combinación de imagen + resolución + formato.
 | «Descargar todas» no aparece | La galería no se ha reconocido como tal (1 imagen) o el botón está desactivado en el popup. |
 | El archivo se guarda sin subcarpeta | Chrome crea la carpeta indicada; los caracteres inválidos se sustituyen por `_`. |
 | La descarga se corta a mitad | La extensión reintenta con la siguiente calidad o resolución. Revisa la conexión. |
+| YouTube: «El servicio de yt-dlp no está instalado» | Ejecuta una vez `Instalar yt-dlp para X media.cmd` y recarga la extensión (↻ en `chrome://extensions/`). |
+| YouTube: «HTTP 403» al descargar | yt-dlp desactualizado. Popup → **General** → «Actualizar yt-dlp». |
+| YouTube: «pide iniciar sesión para comprobar que no eres un robot» | Activa **«YouTube: usar las cookies de Chrome»** en el popup y reinténtalo. |
+| YouTube: el MP3 o el vídeo unido fallan | Falta **ffmpeg**. Se instala con `winget install Gyan.FFmpeg` (el popup lo indica). |
+| YouTube: «no se encuentra yt-dlp» tras instalarlo | El instalador lo dice también: usa `winget install yt-dlp.yt-dlp` y vuelve a ejecutarlo. |
+| YouTube: la descarga tarda mucho | Un 4K con audio ronda los 200 MB. Baja la calidad en el popup (pestaña **Videos** → calidad mínima) o usa M4A para solo audio. |
 
 Los mensajes de error del service worker se traducen desde los códigos de `chrome.downloads`
 (`NETWORK_FAILED`, `SERVER_FORBIDDEN`, `FILE_NO_SPACE`, `USER_CANCELED`, …).
@@ -666,32 +752,52 @@ Los mensajes de error del service worker se traducen desde los códigos de `chro
 - Ejecutar las pruebas (Node 18+, sin dependencias):
 
   ```bash
-  node tools/test.js        # 50 pruebas: variantes, calidad, nombres, HLS, imágenes, puente
+  node tools/test.js        # 94 pruebas: variantes, calidad, nombres, HLS, imágenes, puente, carpetas y YouTube
   node tools/check-popup.js # coherencia popup.html ↔ popup.js, pestañas y estructura HTML
   ```
 
-  `tools/test.js` carga `content.js`, `images.js` y `page-bridge.js` en contextos aislados con stubs
-  del navegador y valida la selección de la máxima calidad y resolución, los respaldos de formato, la
-  reescritura de `name=`/`format=`, la cadena de degradación, la deduplicación de URLs, el saneado de
-  rutas (`../../etc/passwd` → `etc/passwd`), los nombres indexados de galería, el análisis de
-  manifiestos HLS (streams cifrados y segmentos CMAF) y la extracción desde las props de React, con
-  los datos reales del tweet `2100475914182107353` (variante máxima 3828×2160).
+  `tools/test.js` carga `content.js`, `images.js`, `page-bridge.js`, `folders.js` y `youtube.js` en
+  contextos aislados con stubs del navegador y valida la selección de la máxima calidad y resolución,
+  los respaldos de formato, la reescritura de `name=`/`format=`, la cadena de degradación, la
+  deduplicación de URLs, el saneado de rutas (`../../etc/passwd` → `etc/passwd`), los nombres indexados
+  de galería, el análisis de manifiestos HLS (streams cifrados y segmentos CMAF) y la extracción desde
+  las props de React, con los datos reales del tweet `2100475914182107353` (variante máxima 3828×2160).
+  Además comprueba el módulo de YouTube: id del vídeo, URL canónica, colocación del botón en Shorts,
+  traducción de la plantilla de nombre al formato de yt-dlp y la orden exacta que recibe el host.
+
+- Probar el servicio de yt-dlp sin Chrome (protocolo de mensajería nativa y descargas reales):
+
+  ```bash
+  node tools/test-host.js estado          # ¿está instalado? versión, ffmpeg, carpeta
+  node tools/test-host.js m4a             # descarga real y comprobación con ffprobe
+  node tools/test-host.js mp4 <id> 1080   # vídeo a 1080p (imagen + sonido)
+  node tools/test-host.js mp3
+  node tools/test-host.js carpeta         # el saneado nunca sale de Descargas
+  node tools/test-host.js actualizar
+  ```
 
 - Prueba end-to-end en un navegador de verdad (requiere Python 3.9+ y Playwright):
 
   ```bash
   pip install playwright && playwright install chromium
-  python tools/e2e-test.py            # sin ventana
+  python tools/e2e-test.py            # X, Instagram y Facebook (sin ventana)
   python tools/e2e-test.py --headed   # viendo el navegador
+  python tools/e2e-youtube.py         # YouTube real + host nativo + ffprobe
   ```
 
-  Lanza su propio Chromium con la extensión cargada y un **perfil temporal** (no toca tu Chrome, tus
-  ajustes ni tus descargas), sirve una página que imita el DOM de X para el tweet real del fixture,
-  pulsa los botones y comprueba las 24 aserciones: inyección de botones y contadores, pestañas del
-  popup, guardado de ajustes, elección de la variante 3828×2160 y **descarga real desde el CDN de X**
-  (~40 MB), cadena de degradación de imágenes (`orig → 4096x4096 → large → medium`), lote de
+  `e2e-test.py` lanza su propio Chromium con la extensión cargada y un **perfil temporal** (no toca tu
+  Chrome, tus ajustes ni tus descargas), sirve una página que imita el DOM de X para el tweet real del
+  fixture, pulsa los botones y comprueba las 24 aserciones: inyección de botones y contadores, pestañas
+  del popup, guardado de ajustes, elección de la variante 3828×2160 y **descarga real desde el CDN de
+  X** (~40 MB), cadena de degradación de imágenes (`orig → 4096x4096 → large → medium`), lote de
   «Descargar todas» con nombres indexados, avisos en español, no interferencia con el lightbox y el
   panel de diagnóstico. Deja capturas en `%TEMP%\xvd-e2e\shots`.
+
+  `e2e-youtube.py` va **contra YouTube de verdad** (23 comprobaciones): comprueba que el popup ve el
+  servicio de yt-dlp, pulsa el botón sobre un vídeo real y verifica con **ffprobe** que el MP4 trae
+  imagen H.264 y sonido AAC, que el M4A es solo audio AAC, que el MP3 es MPEG válido, que todo cae en
+  la carpeta elegida y con la plantilla de nombre, que el registro no tiene errores y que en Shorts el
+  botón se coloca a la izquierda. Borra los archivos que descarga.
 
   > Nota: las descargas que lanza `chrome.downloads` **no** pasan por el interceptor de Playwright,
   > así que el vídeo se descarga de verdad desde X. Las imágenes usan rutas de prueba (`XVDTESTIMG…`)
@@ -739,9 +845,23 @@ Los mensajes de error del service worker se traducen desde los códigos de `chro
 
 | Criterio | Estado |
 | --- | --- |
-| Permisos mínimos | ✅ `downloads`, `storage`, `activeTab`, `scripting` + hosts de X y `pbs.twimg.com` |
+| Permisos mínimos | ✅ `downloads`, `storage`, `activeTab`, `scripting`, `nativeMessaging` (solo YouTube) + hosts de X, Instagram y Facebook |
 | Interfaz íntegramente en español | ✅ botones, avisos y popup con pestañas |
 | Arquitectura modular (video ≠ imágenes) | ✅ `content.js` (núcleo + video) e `images.js` (imágenes) sobre `__XVD_CORE__` |
+
+### YouTube
+
+| Criterio | Estado |
+| --- | --- |
+| El botón aparece en vídeos y Shorts | ✅ **verificado end-to-end** en youtube.com real (y en Shorts, colocado a la izquierda) |
+| Máxima calidad de verdad, con imagen y sonido | ✅ **verificado end-to-end con ffprobe**: MP4 1280×720 H.264 + AAC en el ajuste de 720p, hasta 4K si no se limita |
+| Solo audio M4A sin recomprimir | ✅ **verificado con ffprobe**: pista AAC original (3,3 MB frente a 29 MB del vídeo) |
+| Solo audio MP3 | ✅ **verificado con ffprobe**: audio MPEG válido, recodificado por ffmpeg |
+| La carpeta y la plantilla del popup se respetan | ✅ **verificado end-to-end**: `Descargas/XVD Pruebas E2E/youtube_<canal>_<título>_<id>.mp4` |
+| Progreso visible y errores en español | ✅ porcentaje, tamaño, velocidad y ETA en la página; 403 / cookies / ffmpeg traducidos |
+| Sin permisos de administrador ni puertos abiertos | ✅ host de mensajería nativa registrado solo en el usuario; Chrome lo arranca y termina por descarga |
+| El saneado de carpetas no permite salir de Descargas | ✅ probado en el propio host (`../fuera`, `C:\Windows` → dentro de Descargas) |
+| No inventa: si no hay yt-dlp, lo dice y explica cómo instalarlo | ✅ aviso en el popup y en la página, sin fallar en silencio |
 
 ---
 
