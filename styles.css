@@ -1,0 +1,800 @@
+/* ===========================================================================
+ * Descargador de videos para X — Hoja de estilos única
+ * ---------------------------------------------------------------------------
+ * 1) Superposición dentro de la página (botón "Descargar" y avisos)
+ * 2) Interfaz del popup de opciones (todo bajo el prefijo .xvd-popup)
+ *
+ * Todas las reglas de la parte 1 están prefijadas con .xvd- para no interferir
+ * con los estilos ni con los controles nativos de X.
+ * ======================================================================== */
+
+/* ===========================================================================
+ * 1. SUPERPOSICIÓN EN LA PÁGINA
+ * ======================================================================== */
+
+.xvd-button {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 2147483000;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 6px 12px 6px 10px;
+  border: 0;
+  border-radius: 9999px;
+  background: rgba(0, 0, 0, 0.75);
+  color: #ffffff;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 18px;
+  letter-spacing: 0.1px;
+  text-transform: none;
+  white-space: nowrap;
+  cursor: pointer;
+  opacity: 0.92;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  transition: background-color 0.15s ease, opacity 0.15s ease, transform 0.15s ease;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.xvd-button:hover {
+  background: #1d9bf0;
+  opacity: 1;
+  transform: translateY(-1px);
+}
+
+.xvd-button:focus-visible {
+  outline: 2px solid #1d9bf0;
+  outline-offset: 2px;
+}
+
+.xvd-button:disabled {
+  cursor: progress;
+  opacity: 0.85;
+}
+
+.xvd-button__iconwrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+}
+
+.xvd-button__icon {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+  display: block;
+}
+
+.xvd-button[data-state="loading"] {
+  background: rgba(29, 155, 240, 0.9);
+}
+
+.xvd-button[data-state="done"] {
+  background: rgba(0, 186, 124, 0.92);
+}
+
+.xvd-button[data-state="error"] {
+  background: rgba(244, 33, 46, 0.92);
+}
+
+/* ---- Variantes para imágenes y galerías ---- */
+
+.xvd-button--image {
+  top: 8px;
+  right: 8px;
+  padding: 5px 10px 5px 8px;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.xvd-button--image .xvd-button__iconwrap,
+.xvd-button--image .xvd-button__icon {
+  width: 16px;
+  height: 16px;
+}
+
+/* En el visor ampliado se baja el botón para no tapar los controles de X. */
+.xvd-button--br {
+  top: auto;
+  bottom: 10px;
+  right: 10px;
+}
+
+.xvd-button--compact {
+  padding: 6px;
+  gap: 0;
+}
+
+.xvd-button--compact .xvd-button__label {
+  display: none;
+}
+
+.xvd-button--gallery {
+  top: auto;
+  bottom: 10px;
+  right: 10px;
+  background: rgba(29, 155, 240, 0.88);
+}
+
+.xvd-button--gallery:hover {
+  background: #1d9bf0;
+}
+
+/* Variante abajo a la izquierda (galerías dentro del visor ampliado). */
+.xvd-button--bl {
+  top: auto;
+  bottom: 10px;
+  left: 10px;
+  right: auto;
+}
+
+/* ---- Contador de galería (1/4, 2/4…) ---- */
+
+.xvd-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 2147483000;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  background: rgba(0, 0, 0, 0.72);
+  color: #ffffff;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+  letter-spacing: 0.3px;
+  pointer-events: none;
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+
+.xvd-spin {
+  animation: xvd-spin 0.85s linear infinite;
+}
+
+@keyframes xvd-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Modo discreto: el botón aparece al pasar el ratón por el reproductor. */
+html.xvd-hover-only .xvd-button,
+html.xvd-hover-only .xvd-badge {
+  opacity: 0;
+  pointer-events: none;
+}
+
+html.xvd-hover-only [data-xvd-host]:hover > .xvd-button,
+html.xvd-hover-only [data-xvd-host]:hover > .xvd-badge,
+html.xvd-hover-only .xvd-button:focus-visible,
+html.xvd-hover-only .xvd-button[data-state="loading"] {
+  opacity: 0.95;
+  pointer-events: auto;
+}
+
+/* ---- Avisos flotantes (toasts) ---- */
+
+.xvd-toasts {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 2147483001;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: min(380px, 82vw);
+  pointer-events: none;
+}
+
+.xvd-toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(15, 20, 25, 0.96);
+  color: #e7e9ea;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 18px;
+  border-left: 3px solid #1d9bf0;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  animation: xvd-toast-in 0.22s ease-out;
+}
+
+.xvd-toast--success {
+  border-left-color: #00ba7c;
+}
+
+.xvd-toast--warn {
+  border-left-color: #ffd400;
+}
+
+.xvd-toast--error {
+  border-left-color: #f4212e;
+}
+
+.xvd-toast__icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.12);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.xvd-toast--success .xvd-toast__icon {
+  color: #00ba7c;
+}
+
+.xvd-toast--error .xvd-toast__icon {
+  color: #f4212e;
+}
+
+.xvd-toast--warn .xvd-toast__icon {
+  color: #ffd400;
+}
+
+.xvd-toast__msg {
+  flex: 1 1 auto;
+  word-break: break-word;
+}
+
+.xvd-toast--out {
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+@keyframes xvd-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ===========================================================================
+ * 2. POPUP DE OPCIONES
+ * ======================================================================== */
+
+.xvd-visually-hidden {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.xvd-popup {
+  --xvd-bg: #000000;
+  --xvd-surface: #16181c;
+  --xvd-surface-2: #1d1f23;
+  --xvd-border: #2f3336;
+  --xvd-text: #e7e9ea;
+  --xvd-text-dim: #71767b;
+  --xvd-accent: #1d9bf0;
+  --xvd-accent-soft: rgba(29, 155, 240, 0.14);
+  --xvd-ok: #00ba7c;
+  --xvd-danger: #f4212e;
+
+  width: 348px;
+  margin: 0;
+  padding: 0;
+  background: var(--xvd-bg);
+  color: var(--xvd-text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 13px;
+  line-height: 1.4;
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: light) {
+  .xvd-popup {
+    --xvd-bg: #ffffff;
+    --xvd-surface: #f7f9f9;
+    --xvd-surface-2: #eff3f4;
+    --xvd-border: #cfd9de;
+    --xvd-text: #0f1419;
+    --xvd-text-dim: #536471;
+    color-scheme: light;
+  }
+}
+
+.xvd-popup * {
+  box-sizing: border-box;
+}
+
+.xvd-popup__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--xvd-border);
+}
+
+.xvd-popup__brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.xvd-popup__logo {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: var(--xvd-accent);
+  color: #ffffff;
+}
+
+.xvd-popup__logo svg {
+  width: 20px;
+  height: 20px;
+  fill: currentColor;
+}
+
+.xvd-popup__titles {
+  min-width: 0;
+}
+
+.xvd-popup__titles h1 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.1px;
+}
+
+.xvd-popup__status {
+  margin: 2px 0 0;
+  font-size: 11.5px;
+  color: var(--xvd-text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 210px;
+}
+
+.xvd-popup__status--ok {
+  color: var(--xvd-ok);
+}
+
+.xvd-popup__status--muted {
+  color: var(--xvd-text-dim);
+}
+
+.xvd-popup__body {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 424px;
+  overflow-y: auto;
+}
+
+/* ---- Pestañas: Videos | Imágenes | General ---- */
+
+.xvd-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 6px 10px 0;
+  background: var(--xvd-bg);
+  border-bottom: 1px solid var(--xvd-border);
+}
+
+.xvd-tab {
+  flex: 1 1 0;
+  padding: 9px 4px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 8px 8px 0 0;
+  background: transparent;
+  color: var(--xvd-text-dim);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.xvd-tab:hover {
+  color: var(--xvd-text);
+  background: var(--xvd-surface-2);
+}
+
+.xvd-tab.is-active {
+  color: var(--xvd-accent);
+  border-bottom-color: var(--xvd-accent);
+}
+
+.xvd-tab:focus-visible {
+  outline: 2px solid var(--xvd-accent);
+  outline-offset: -2px;
+}
+
+.xvd-panel[hidden] {
+  display: none;
+}
+
+.xvd-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Con los botones de imagen desactivados, sus ajustes quedan atenuados. */
+.xvd-popup--images-off #panel-imagenes .xvd-card:not(:first-child) {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.xvd-popup--disabled .xvd-popup__body {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.xvd-card {
+  background: var(--xvd-surface);
+  border: 1px solid var(--xvd-border);
+  border-radius: 14px;
+  padding: 12px;
+}
+
+.xvd-card h2 {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--xvd-text-dim);
+}
+
+.xvd-hint {
+  margin: 10px 0 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--xvd-text-dim);
+}
+
+/* ---- Interruptor on/off ---- */
+
+.xvd-switch {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.xvd-switch input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.xvd-switch__track {
+  position: relative;
+  display: inline-block;
+  width: 42px;
+  height: 24px;
+  border-radius: 9999px;
+  background: var(--xvd-surface-2);
+  border: 1px solid var(--xvd-border);
+  transition: background-color 0.18s ease, border-color 0.18s ease;
+}
+
+.xvd-switch__thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--xvd-text-dim);
+  transition: transform 0.18s ease, background-color 0.18s ease;
+}
+
+.xvd-switch input:checked + .xvd-switch__track {
+  background: var(--xvd-accent);
+  border-color: var(--xvd-accent);
+}
+
+.xvd-switch input:checked + .xvd-switch__track .xvd-switch__thumb {
+  background: #ffffff;
+  transform: translateX(18px);
+}
+
+.xvd-switch input:focus-visible + .xvd-switch__track {
+  outline: 2px solid var(--xvd-accent);
+  outline-offset: 2px;
+}
+
+/* ---- Control segmentado de formato ---- */
+
+.xvd-segmented {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  padding: 4px;
+  background: var(--xvd-surface-2);
+  border-radius: 9999px;
+}
+
+.xvd-segmented__item {
+  position: relative;
+  display: block;
+  cursor: pointer;
+}
+
+.xvd-segmented__item input {
+  position: absolute;
+  opacity: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  cursor: pointer;
+}
+
+.xvd-segmented__item span {
+  display: block;
+  padding: 7px 0;
+  text-align: center;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--xvd-text-dim);
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.xvd-segmented__item input:checked + span {
+  background: var(--xvd-accent);
+  color: #ffffff;
+}
+
+.xvd-segmented__item input:focus-visible + span {
+  outline: 2px solid var(--xvd-accent);
+  outline-offset: 2px;
+}
+
+/* ---- Opciones (radio / checkbox) ---- */
+
+.xvd-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.xvd-option:hover {
+  background: var(--xvd-surface-2);
+}
+
+.xvd-option + .xvd-option {
+  margin-top: 2px;
+}
+
+.xvd-option input[type="radio"],
+.xvd-option input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin: 1px 0 0;
+  accent-color: var(--xvd-accent);
+  cursor: pointer;
+}
+
+.xvd-option span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.xvd-option strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.xvd-option small {
+  font-size: 11.5px;
+  color: var(--xvd-text-dim);
+  line-height: 1.35;
+}
+
+/* ---- Campos ---- */
+
+.xvd-field {
+  display: block;
+  margin-top: 10px;
+}
+
+.xvd-field:first-child {
+  margin-top: 0;
+}
+
+.xvd-field__label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--xvd-text-dim);
+}
+
+.xvd-field--inline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.xvd-field--inline .xvd-field__label {
+  margin-bottom: 0;
+}
+
+.xvd-field input[type="text"],
+.xvd-field select {
+  width: 100%;
+  padding: 9px 11px;
+  border-radius: 10px;
+  border: 1px solid var(--xvd-border);
+  background: var(--xvd-bg);
+  color: var(--xvd-text);
+  font-family: inherit;
+  font-size: 12.5px;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.xvd-field--inline select {
+  width: auto;
+  min-width: 132px;
+}
+
+.xvd-field input[type="text"]:focus,
+.xvd-field select:focus {
+  border-color: var(--xvd-accent);
+  box-shadow: 0 0 0 2px var(--xvd-accent-soft);
+}
+
+.xvd-field input:disabled,
+.xvd-field select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.xvd-field__help {
+  display: block;
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--xvd-text-dim);
+}
+
+.xvd-field__help code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--xvd-surface-2);
+  font-size: 10.5px;
+}
+
+/* ---- Detalles / avanzado ---- */
+
+.xvd-details summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--xvd-text-dim);
+  list-style: none;
+}
+
+.xvd-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.xvd-details summary::after {
+  content: "▾";
+  float: right;
+  transition: transform 0.15s ease;
+}
+
+.xvd-details[open] summary::after {
+  transform: rotate(180deg);
+}
+
+.xvd-details[open] summary {
+  margin-bottom: 10px;
+}
+
+/* ---- Pie ---- */
+
+.xvd-popup__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--xvd-border);
+  background: var(--xvd-surface);
+}
+
+.xvd-btn {
+  padding: 8px 14px;
+  border: 0;
+  border-radius: 9999px;
+  background: var(--xvd-accent);
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: filter 0.15s ease, background-color 0.15s ease;
+}
+
+.xvd-btn:hover {
+  filter: brightness(1.08);
+}
+
+.xvd-btn--ghost {
+  background: transparent;
+  color: var(--xvd-text);
+  border: 1px solid var(--xvd-border);
+}
+
+.xvd-btn--ghost:hover {
+  background: var(--xvd-surface-2);
+}
+
+.xvd-save {
+  flex: 1 1 auto;
+  text-align: center;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--xvd-text-dim);
+  transition: color 0.15s ease;
+}
+
+.xvd-save--ok {
+  color: var(--xvd-ok);
+}
+
+.xvd-save--error {
+  color: var(--xvd-danger);
+}

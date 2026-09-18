@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Descargador de medios para X</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="xvd-popup">
+    <header class="xvd-popup__header">
+      <div class="xvd-popup__brand">
+        <span class="xvd-popup__logo" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path
+              d="M12 3a1 1 0 0 1 1 1v8.59l2.3-2.3a1 1 0 1 1 1.4 1.42l-4 4a1 1 0 0 1-1.4 0l-4-4a1 1 0 0 1 1.4-1.42l2.3 2.3V4a1 1 0 0 1 1-1Z"
+            />
+            <path
+              d="M4 15a1 1 0 0 1 1 1v2a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2a1 1 0 1 1 2 0v2a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3v-2a1 1 0 0 1 1-1Z"
+            />
+          </svg>
+        </span>
+        <div class="xvd-popup__titles">
+          <h1>Descargador para X</h1>
+          <p id="tabStatus">Comprobando la pestaña…</p>
+        </div>
+      </div>
+
+      <label class="xvd-switch" title="Activar o desactivar la extensión">
+        <input type="checkbox" id="enabled" />
+        <span class="xvd-switch__track"><span class="xvd-switch__thumb"></span></span>
+        <span class="xvd-visually-hidden">Activar la extensión</span>
+      </label>
+    </header>
+
+    <nav class="xvd-tabs" role="tablist" aria-label="Secciones de configuración">
+      <button type="button" class="xvd-tab" role="tab" id="tab-videos" data-tab="videos" aria-controls="panel-videos">
+        Videos
+      </button>
+      <button type="button" class="xvd-tab" role="tab" id="tab-imagenes" data-tab="imagenes" aria-controls="panel-imagenes">
+        Imágenes
+      </button>
+      <button type="button" class="xvd-tab" role="tab" id="tab-general" data-tab="general" aria-controls="panel-general">
+        General
+      </button>
+    </nav>
+
+    <main class="xvd-popup__body">
+      <!-- ============================ VIDEOS ============================ -->
+      <section class="xvd-panel" id="panel-videos" role="tabpanel" aria-labelledby="tab-videos">
+        <div class="xvd-card">
+          <h2>Formato de video</h2>
+          <div class="xvd-segmented" role="radiogroup" aria-label="Formato de video">
+            <label class="xvd-segmented__item">
+              <input type="radio" name="format" value="auto" />
+              <span>Auto</span>
+            </label>
+            <label class="xvd-segmented__item">
+              <input type="radio" name="format" value="mp4" />
+              <span>MP4</span>
+            </label>
+            <label class="xvd-segmented__item">
+              <input type="radio" name="format" value="webm" />
+              <span>WebM</span>
+            </label>
+            <label class="xvd-segmented__item">
+              <input type="radio" name="format" value="m4a" />
+              <span>M4A</span>
+            </label>
+          </div>
+          <p class="xvd-hint" id="formatHint">
+            <strong>Auto</strong> elige la mejor variante disponible (normalmente MP4).
+          </p>
+        </div>
+
+        <div class="xvd-card">
+          <h2>Calidad de video</h2>
+          <label class="xvd-option">
+            <input type="radio" name="quality" value="max" />
+            <span>
+              <strong>Máxima disponible</strong>
+              <small>Prioriza resolución y bitrate más altos.</small>
+            </span>
+          </label>
+          <label class="xvd-option">
+            <input type="radio" name="quality" value="custom" />
+            <span>
+              <strong>Personalizada</strong>
+              <small>Nunca por debajo de la altura elegida.</small>
+            </span>
+          </label>
+          <label class="xvd-field xvd-field--inline" for="minHeight">
+            <span class="xvd-field__label">Altura mínima</span>
+            <select id="minHeight">
+              <option value="2160">2160p (4K)</option>
+              <option value="1440">1440p (2K)</option>
+              <option value="1080">1080p (Full HD)</option>
+              <option value="720">720p (HD)</option>
+              <option value="480">480p</option>
+              <option value="360">360p</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="xvd-card">
+          <h2>Comportamiento</h2>
+          <label class="xvd-option xvd-option--check">
+            <input type="checkbox" id="autoFallback" />
+            <span>
+              <strong>Reintentar con calidad inferior si falla</strong>
+              <small>Si la variante máxima da error, prueba la siguiente.</small>
+            </span>
+          </label>
+          <label class="xvd-field xvd-field--inline" for="audioFallback">
+            <span class="xvd-field__label">Si no hay pista de audio (M4A)</span>
+            <select id="audioFallback">
+              <option value="mp4">Descargar el MP4 completo</option>
+              <option value="error">Cancelar y avisar</option>
+            </select>
+          </label>
+          <label class="xvd-option xvd-option--check">
+            <input type="checkbox" id="hlsFallback" />
+            <span>
+              <strong>Reconstruir streams HLS</strong>
+              <small>
+                Une los segmentos del stream en memoria. Útil cuando no hay MP4 directo; consume más RAM.
+              </small>
+            </span>
+          </label>
+        </div>
+
+        <details class="xvd-card xvd-details">
+          <summary>Nombre del archivo de video</summary>
+          <label class="xvd-field" for="filenameTemplate">
+            <span class="xvd-field__label">Plantilla</span>
+            <input
+              type="text"
+              id="filenameTemplate"
+              placeholder="{usuario}_{id}_{calidad}"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <small class="xvd-field__help">
+              Variables: <code>{usuario}</code> <code>{id}</code> <code>{tweet}</code> <code>{fecha}</code>
+              <code>{calidad}</code> <code>{bitrate}</code> <code>{ext}</code>
+            </small>
+          </label>
+        </details>
+      </section>
+
+      <!-- =========================== IMÁGENES =========================== -->
+      <section class="xvd-panel" id="panel-imagenes" role="tabpanel" aria-labelledby="tab-imagenes" hidden>
+        <div class="xvd-card">
+          <h2>Imágenes</h2>
+          <label class="xvd-option xvd-option--check">
+            <input type="checkbox" id="imagesEnabled" />
+            <span>
+              <strong>Activar los botones en imágenes</strong>
+              <small>Desactívalo para descargar únicamente videos.</small>
+            </span>
+          </label>
+        </div>
+
+        <div class="xvd-card">
+          <h2>Resolución de imagen</h2>
+          <label class="xvd-field xvd-field--inline" for="imageResolution">
+            <span class="xvd-field__label">Tamaño solicitado a X</span>
+            <select id="imageResolution">
+              <option value="orig">orig (máxima)</option>
+              <option value="4096x4096">4096×4096</option>
+              <option value="large">large</option>
+              <option value="medium">medium</option>
+            </select>
+          </label>
+          <p class="xvd-hint">
+            <strong>orig</strong> descarga el archivo original sin recomprimir. Si no está disponible, se aplica la
+            resolución alternativa configurada abajo.
+          </p>
+        </div>
+
+        <div class="xvd-card">
+          <h2>Formato de imagen</h2>
+          <div class="xvd-segmented" role="radiogroup" aria-label="Formato de imagen">
+            <label class="xvd-segmented__item">
+              <input type="radio" name="imageFormat" value="auto" />
+              <span>Auto</span>
+            </label>
+            <label class="xvd-segmented__item">
+              <input type="radio" name="imageFormat" value="jpg" />
+              <span>JPG</span>
+            </label>
+            <label class="xvd-segmented__item">
+              <input type="radio" name="imageFormat" value="png" />
+              <span>PNG</span>
+            </label>
+            <label class="xvd-segmented__item">
+              <input type="radio" name="imageFormat" value="webp" />
+              <span>WEBP</span>
+            </label>
+          </div>
+          <p class="xvd-hint" id="imageFormatHint">
+            <strong>Auto</strong> respeta el formato original (JPG, PNG, WEBP o GIF).
+          </p>
+        </div>
+
+        <div class="xvd-card">
+          <h2>Galerías y comportamiento</h2>
+          <label class="xvd-option xvd-option--check">
+            <input type="checkbox" id="galleryButton" />
+            <span>
+              <strong>Botón «Descargar todas» en galerías</strong>
+              <small>Descarga secuencialmente las 2-4 imágenes del tweet.</small>
+            </span>
+          </label>
+          <label class="xvd-option xvd-option--check">
+            <input type="checkbox" id="imageFallback" />
+            <span>
+              <strong>Usar resolución alternativa si orig falla</strong>
+              <small>Cadena orig → 4096×4096 → large → medium.</small>
+            </span>
+          </label>
+          <label class="xvd-option xvd-option--check">
+            <input type="checkbox" id="imageVerify" />
+            <span>
+              <strong>Comprobar disponibilidad antes de descargar</strong>
+              <small>Evita guardar una página de error en lugar de la imagen.</small>
+            </span>
+          </label>
+          <label class="xvd-option xvd-option--check">
+            <input type="checkbox" id="compactImageButton" />
+            <span>
+              <strong>Botón de imagen compacto (solo icono)</strong>
+              <small>Más discreto en galerías pequeñas.</small>
+            </span>
+          </label>
+        </div>
+
+        <details class="xvd-card xvd-details">
+          <summary>Nombre del archivo de imagen</summary>
+          <label class="xvd-field" for="imageFilenameTemplate">
+            <span class="xvd-field__label">Plantilla</span>
+            <input
+              type="text"
+              id="imageFilenameTemplate"
+              placeholder="tweet_{id}_img{indice}"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <small class="xvd-field__help">
+              Variables: <code>{id}</code> <code>{tweet}</code> <code>{usuario}</code> <code>{fecha}</code>
+              <code>{indice}</code> <code>{total}</code> <code>{resolucion}</code> <code>{ext}</code><br />
+              Por defecto: <code>tweet_[id]_img1.jpg</code>, <code>tweet_[id]_img2.jpg</code>…
+            </small>
+          </label>
+        </details>
+      </section>
+
+      <!-- ============================ GENERAL =========================== -->
+      <section class="xvd-panel" id="panel-general" role="tabpanel" aria-labelledby="tab-general" hidden>
+        <div class="xvd-card">
+          <h2>Carpeta de descarga</h2>
+          <label class="xvd-field" for="folder">
+            <span class="xvd-field__label">Subcarpeta dentro de Descargas</span>
+            <input type="text" id="folder" placeholder="X Videos" autocomplete="off" spellcheck="false" />
+          </label>
+          <label class="xvd-option xvd-option--check">
+            <input type="checkbox" id="askWhereToSave" />
+            <span>
+              <strong>Preguntar dónde guardar cada vez</strong>
+              <small>Muestra el diálogo «Guardar como» de Chrome.</small>
+            </span>
+          </label>
+        </div>
+
+        <div class="xvd-card">
+          <h2>Interfaz</h2>
+          <label class="xvd-option xvd-option--check">
+            <input type="checkbox" id="showToasts" />
+            <span>
+              <strong>Mostrar avisos en la página</strong>
+              <small>Notificaciones de progreso y error dentro de X.</small>
+            </span>
+          </label>
+          <label class="xvd-option xvd-option--check">
+            <input type="checkbox" id="showOnHover" />
+            <span>
+              <strong>Mostrar los botones solo al pasar el ratón</strong>
+              <small>Interfaz más discreta sobre videos e imágenes.</small>
+            </span>
+          </label>
+        </div>
+
+        <div class="xvd-card">
+          <h2>Estado</h2>
+          <p class="xvd-hint" id="generalStatus">—</p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="xvd-popup__footer">
+      <button type="button" id="reset" class="xvd-btn xvd-btn--ghost">Restablecer</button>
+      <span class="xvd-save" id="saveStatus" role="status"></span>
+      <button type="button" id="openDownloads" class="xvd-btn">Abrir carpeta</button>
+    </footer>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

@@ -1,0 +1,17 @@
+# Sistema operativo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Paquetes empaquetados para la Chrome Web Store
+*.zip
+*.crx
+*.pem
+
+# Dependencias (el proyecto no usa ninguna, pero por si acaso)
+node_modules/
+
+# Editores
+.vscode/
+.idea/
+*.swp
