@@ -37,7 +37,13 @@
   const MARK = '__xvdBridge';
   const MAX_MEDIA = 12;
   const MAX_VARIANTS = 24;
-  const ALLOWED_HOSTS = ['video.twimg.com', 'pbs.twimg.com'];
+  const ALLOWED_HOSTS = ['video.twimg.com', 'pbs.twimg.com', 'cdninstagram.com', 'fbcdn.net'];
+
+  /** Host permitido, incluyendo subdominios (scontent-*.cdninstagram.com). */
+  function hostPermitido(host) {
+    const h = String(host || '').toLowerCase();
+    return ALLOWED_HOSTS.some((permitido) => h === permitido || h.endsWith('.' + permitido));
+  }
 
   /* =======================================================================
    * 1. Utilidades
@@ -315,16 +321,217 @@
   }
 
   /* =======================================================================
+   * 2b. Instagram
+   *
+   * IG es también una SPA de React con Relay, así que sus datos (video_versions,
+   * image_versions2, carousel_media) viven en las props de las fibras y son
+   * invisibles desde el mundo aislado. Se buscan por FORMA, no por ruta, para
+   * aguantar los cambios de envoltorio de la API.
+   *
+   * Ojo: las URLs de IG van firmadas (oh= / oe=) y CADUCAN, así que se devuelven
+   * tal cual, sin reescribirlas (a diferencia de pbs.twimg.com en X).
+   * ===================================================================== */
+
+  function pareceMediaDeInstagram(valor) {
+    return (
+      !!valor &&
+      typeof valor === 'object' &&
+      (Array.isArray(valor.video_versions) ||
+        (valor.image_versions2 && Array.isArray(valor.image_versions2.candidates)) ||
+        Array.isArray(valor.carousel_media))
+    );
+  }
+
+  function mejorPorTamano(lista) {
+    return lista
+      .filter((c) => c && typeof c.url === 'string' && c.url)
+      .slice()
+      .sort((a, b) => (Number(b.width) || 0) * (Number(b.height) || 0) - (Number(a.width) || 0) * (Number(a.height) || 0))[0];
+  }
+
+  /** Convierte una entidad de IG en una lista de elementos descargables. */
+  function normalizarMediaInstagram(entidad) {
+    if (!entidad || typeof entidad !== 'object') return null;
+
+    const partes =
+      Array.isArray(entidad.carousel_media) && entidad.carousel_media.length
+        ? entidad.carousel_media
+        : [entidad];
+
+    const items = [];
+    for (const parte of partes) {
+      if (!parte || typeof parte !== 'object') continue;
+
+      const videos = Array.isArray(parte.video_versions) ? parte.video_versions : [];
+      const imagenes =
+        parte.image_versions2 && Array.isArray(parte.image_versions2.candidates)
+          ? parte.image_versions2.candidates
+          : [];
+
+      const mejorVideo = mejorPorTamano(videos);
+      const mejorImagen = mejorPorTamano(imagenes);
+
+      if (mejorVideo) {
+        items.push({
+          tipo: 'video',
+          url: mejorVideo.url,
+          ancho: Number(mejorVideo.width) || 0,
+          alto: Number(mejorVideo.height) || 0,
+          duracion: Number(parte.video_duration) || 0,
+          poster: mejorImagen ? mejorImagen.url : ''
+        });
+      } else if (mejorImagen) {
+        items.push({
+          tipo: 'imagen',
+          url: mejorImagen.url,
+          ancho: Number(mejorImagen.width) || 0,
+          alto: Number(mejorImagen.height) || 0
+        });
+      }
+    }
+
+    if (!items.length) return null;
+
+    const usuario = String(
+      (entidad.user && entidad.user.username) ||
+        (entidad.owner && entidad.owner.username) ||
+        (partes[0] && partes[0].user && partes[0].user.username) ||
+        ''
+    );
+
+    return {
+      code: String(entidad.code || entidad.shortcode || ''),
+      id: String(entidad.pk || entidad.id || entidad.media_id || ''),
+      usuario,
+      tipo: items.length > 1 ? 'carrusel' : items[0].tipo,
+      items
+    };
+  }
+
+  /** Búsqueda acotada por forma, igual que en X pero con el predicado de IG. */
+  function deepCollectInstagram(root, out, limits) {
+    const maxDepth = (limits && limits.maxDepth) || 8;
+    const maxSteps = (limits && limits.maxSteps) || 6000;
+    const queue = [{ value: root, depth: 0 }];
+    const seen = new WeakSet();
+    let steps = 0;
+
+    while (queue.length && steps < maxSteps) {
+      const { value, depth } = queue.shift();
+      steps++;
+      if (!value || typeof value !== 'object' || depth > maxDepth) continue;
+      if (seen.has(value)) continue;
+      seen.add(value);
+
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          if (item && typeof item === 'object') queue.push({ value: item, depth: depth + 1 });
+        }
+        continue;
+      }
+
+      if (pareceMediaDeInstagram(value)) {
+        const media = normalizarMediaInstagram(value);
+        if (media) out.push(media);
+        continue;
+      }
+
+      for (const key of Object.keys(value)) {
+        if (key === 'return' || key === 'child' || key === 'sibling' || key === '_owner') continue;
+        const hijo = value[key];
+        if (hijo && typeof hijo === 'object') queue.push({ value: hijo, depth: depth + 1 });
+      }
+    }
+    return out;
+  }
+
+  function dedupeInstagram(lista) {
+    const mapa = new Map();
+    for (const media of lista) {
+      if (!media || !media.items.length) continue;
+      const clave = media.code || media.id || media.items.map((i) => i.url).join('|');
+      const previo = mapa.get(clave);
+      if (!previo || previo.items.length < media.items.length) mapa.set(clave, media);
+    }
+    return Array.from(mapa.values());
+  }
+
+  /** Recoge todo lo que se encuentre en la página (fibras, props y estados). */
+  function collectInstagram() {
+    const encontrados = [];
+
+    // 1) Props de React y cadena de fibras de cada <article> y cada <video>/<img>.
+    const anclas = [];
+    try {
+      document.querySelectorAll('article, main, video, img').forEach((el) => {
+        if (anclas.length < 40) anclas.push(el);
+      });
+    } catch (_) {
+      /* sin DOM */
+    }
+
+    for (const el of anclas) {
+      const props = getReactProps(el);
+      if (props) deepCollectInstagram(props, encontrados, { maxDepth: 8, maxSteps: 5000 });
+
+      let fiber = getFiber(el);
+      let saltos = 0;
+      while (fiber && saltos < 30) {
+        if (fiber.memoizedProps) deepCollectInstagram(fiber.memoizedProps, encontrados, { maxDepth: 6, maxSteps: 2000 });
+        fiber = fiber.return;
+        saltos++;
+      }
+    }
+
+    // 2) Estados globales (IG usó _sharedData; el embed, __additionalData).
+    for (const estado of [window._sharedData, window.__additionalData, window.__INITIAL_STATE__]) {
+      if (estado) {
+        try {
+          deepCollectInstagram(estado, encontrados, { maxDepth: 9, maxSteps: 6000 });
+        } catch (_) {
+          /* estado no serializable */
+        }
+      }
+    }
+
+    return dedupeInstagram(encontrados);
+  }
+
+  /* =======================================================================
    * 3. Saneado de la respuesta (defensa frente a mensajes falsificados)
    * ===================================================================== */
 
   function allowedUrl(url) {
     if (typeof url !== 'string' || !/^https:\/\//i.test(url)) return false;
     try {
-      return ALLOWED_HOSTS.includes(new URL(url).hostname.toLowerCase());
+      return hostPermitido(new URL(url).hostname);
     } catch (_) {
       return false;
     }
+  }
+
+  /** Saneado de los elementos de Instagram (URLs firmadas: se devuelven enteras). */
+  function sanitizeInstagram(media) {
+    if (!media || !Array.isArray(media.items)) return null;
+    const items = media.items
+      .filter((i) => i && (i.tipo === 'video' || i.tipo === 'imagen') && allowedUrl(i.url))
+      .slice(0, 20)
+      .map((i) => ({
+        tipo: i.tipo,
+        url: i.url,
+        ancho: Number(i.ancho) || 0,
+        alto: Number(i.alto) || 0,
+        duracion: Number(i.duracion) || 0,
+        poster: allowedUrl(i.poster) ? i.poster : ''
+      }));
+    if (!items.length) return null;
+    return {
+      code: String(media.code || ''),
+      id: String(media.id || ''),
+      usuario: String(media.usuario || ''),
+      tipo: items.length > 1 ? 'carrusel' : items[0].tipo,
+      items
+    };
   }
 
   function sanitizeEntity(media) {
@@ -362,6 +569,26 @@
     const requestId = typeof data.requestId === 'string' ? data.requestId : '';
     if (!requestId) return;
 
+    // --- Instagram -------------------------------------------------------
+    if (data.sitio === 'instagram') {
+      let medios = [];
+      try {
+        const todos = collectInstagram();
+        const code = String(data.code || '');
+        const elegidos = code ? todos.filter((m) => m.code === code) : todos;
+        medios = (elegidos.length ? elegidos : todos).map(sanitizeInstagram).filter(Boolean).slice(0, MAX_MEDIA);
+      } catch (_) {
+        medios = [];
+      }
+      try {
+        window.postMessage({ [MARK]: true, kind: 'response', sitio: 'instagram', requestId, medios }, '*');
+      } catch (_) {
+        /* respuesta no clonable */
+      }
+      return;
+    }
+
+    // --- X (Twitter) ------------------------------------------------------
     let payload = [];
     try {
       const media = collectFor(String(data.mediaId || ''), String(data.poster || ''));
@@ -396,7 +623,12 @@
       collectFor,
       sanitizeEntity,
       allowedUrl,
-      onMessage
+      onMessage,
+      // Instagram
+      pareceMediaDeInstagram,
+      normalizarMediaInstagram,
+      sanitizeInstagram,
+      hostPermitido
     };
   }
 })();

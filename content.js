@@ -39,7 +39,7 @@
   const TOASTS_ID = 'xvd-toasts';
 
   /** Versión del núcleo (se muestra en el diagnóstico del popup). */
-  const coreVersion = '2.3.0';
+  const coreVersion = '2.4.0';
 
   const DEFAULT_SETTINGS = {
     /* --- General --- */
@@ -64,7 +64,10 @@
     compactImageButton: false,     // botón de imagen solo con icono
     imageFallback: true,           // degradar la resolución si orig falla
     imageVerify: true,             // comprobar disponibilidad antes de descargar
-    imageFilenameTemplate: 'tweet_{id}_img{indice}' // plantilla del nombre de imagen
+    imageFilenameTemplate: 'tweet_{id}_img{indice}', // plantilla del nombre de imagen
+    /* --- Otros sitios --- */
+    instagramEnabled: true,        // botones también en Instagram
+    instagramFilenameTemplate: 'instagram_{usuario}_{id}_{indice}'
   };
 
   const QUALITY_ORDER = [2160, 1440, 1080, 720, 480, 360];
@@ -244,53 +247,70 @@
       const resolver = bridgeRequests.get(data.requestId);
       if (!resolver) return;
       bridgeRequests.delete(data.requestId);
-      resolver(Array.isArray(data.media) ? data.media : []);
+      resolver(data);
     },
     false
   );
 
   /**
-   * Pide al puente las entidades multimedia del reproductor indicado.
-   * Nunca lanza: si el puente no está presente o no responde, devuelve [].
+   * Envía una petición al puente del mundo de la página y devuelve su respuesta
+   * completa (o null si no llega a tiempo). Sirve para X y para Instagram.
    */
-  function requestMediaFromBridge(mediaId, poster, timeoutMs) {
+  function pedirAlPuente(peticion, timeoutMs) {
     return new Promise((resolve) => {
       const requestId = 'xvd-' + Date.now() + '-' + Math.random().toString(36).slice(2);
       const limite = timeoutMs || BRIDGE_TIMEOUT;
       let settled = false;
 
-      const finish = (media) => {
+      const finish = (valor) => {
         if (settled) return;
         settled = true;
         bridgeRequests.delete(requestId);
-        resolve(media);
+        resolve(valor);
       };
 
       const timer = setTimeout(() => {
         if (settled) return;
         bridgeTimeouts++;
         log('warn', 'resolucion', 'El puente del mundo de la página no respondió a tiempo', {
+          sitio: peticion.sitio || 'x',
           ms: limite,
           veces: bridgeTimeouts
         });
-        finish([]);
+        finish(null);
       }, limite);
 
-      bridgeRequests.set(requestId, (media) => {
+      bridgeRequests.set(requestId, (respuesta) => {
         clearTimeout(timer);
-        finish(media);
+        finish(respuesta);
       });
 
       try {
-        window.postMessage(
-          { [BRIDGE_MARK]: true, kind: 'request', requestId, mediaId: mediaId || '', poster: poster || '' },
-          '*'
-        );
+        window.postMessage({ [BRIDGE_MARK]: true, kind: 'request', requestId, ...peticion }, '*');
       } catch (_) {
         clearTimeout(timer);
-        finish([]);
+        finish(null);
       }
     });
+  }
+
+  /** Pide al puente las entidades multimedia del reproductor de X. */
+  async function requestMediaFromBridge(mediaId, poster, timeoutMs) {
+    const respuesta = await pedirAlPuente({ mediaId, poster }, timeoutMs);
+    return respuesta && Array.isArray(respuesta.media) ? respuesta.media : [];
+  }
+
+  /** Pide al puente los medios de una publicación de Instagram (por su código). */
+  async function requestInstagramMedia(code, timeoutMs) {
+    const respuesta = await pedirAlPuente({ sitio: 'instagram', code }, timeoutMs);
+    return respuesta && Array.isArray(respuesta.medios) ? respuesta.medios : [];
+  }
+
+  /** Descarga una URL y devuelve sus bytes (con las cookies de la página). */
+  async function fetchBytes(url) {
+    const res = await fetch(url, { credentials: 'include' });
+    if (!res.ok) throw new Error('El servidor respondió HTTP ' + res.status + '.');
+    return new Uint8Array(await res.arrayBuffer());
   }
 
   /* =======================================================================
@@ -1529,7 +1549,9 @@
       });
     }
   }
-  registerScanner(scanVideos);
+  /* Este módulo es solo para X: en otros sitios hay un módulo propio
+     (instagram.js, facebook.js…). Si no, pondría botones de X en Instagram. */
+  if (/(^|\.)(x|twitter)\.com$/i.test(location.hostname)) registerScanner(scanVideos);
 
   const scheduleScan = debounce(() => {
     if (!settings.enabled) return;
@@ -2195,7 +2217,14 @@
     sanitizeFolder,
     cleanupOverlays,
     isOurNode,
-    scan: scheduleScan
+    scan: scheduleScan,
+    // Compartido con los módulos de otros sitios (instagram.js, facebook.js…)
+    pedirAlPuente,
+    requestInstagramMedia,
+    fetchBytes,
+    convertirMp3,
+    guardarBytes: enviarBytesAGuardar,
+    descargarBlobEnLaPagina
   };
 
   /* =======================================================================

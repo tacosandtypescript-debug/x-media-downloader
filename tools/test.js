@@ -26,6 +26,7 @@ function loadContentScript() {
     Promise,
     URL,
     Blob: function Blob() {},
+    location: { hostname: 'x.com', pathname: '/' },
     performance: { getEntriesByType: () => [] },
     fetch: () => Promise.reject(new Error('sin red en las pruebas')),
     getComputedStyle: () => ({ position: 'static' }),
@@ -118,6 +119,7 @@ function loadImagesModule(defaults) {
     Promise,
     URL,
     Image: function Image() {},
+    location: { hostname: 'x.com', pathname: '/' },
     document: { querySelectorAll: () => [] },
     getComputedStyle: () => ({ position: 'static' }),
     ResizeObserver: function ResizeObserver() {
@@ -162,6 +164,7 @@ function loadBridge(options) {
     setTimeout,
     clearTimeout,
     URL,
+    location: { hostname: 'x.com', pathname: '/' },
     document: {
       querySelectorAll: (selector) => (selector === 'video' ? [video] : [])
     },
@@ -880,6 +883,143 @@ test('el archivo de audio se llama con su bitrate y su extensión', () => {
     config({ folder: 'X Videos' })
   );
   assert.ok(nombreMp3.endsWith('_128kbps.mp3'), nombreMp3);
+});
+
+/* ------------------------------------------------------------ instagram -- */
+
+console.log('\nInstagram (extractor del puente)');
+
+// Forma real de los datos de IG: video_versions / image_versions2 / carousel_media.
+const IG_REEL = {
+  code: 'DdXUcJaSe8X',
+  pk: '3987744811663759326',
+  media_type: 2,
+  video_duration: 12.5,
+  user: { username: 'khetzalgg' },
+  video_versions: [
+    { url: 'https://scontent.cdninstagram.com/v/t51/video-720.mp4', width: 720, height: 1280, type: 101 },
+    { url: 'https://scontent.cdninstagram.com/v/t51/video-1080.mp4', width: 1080, height: 1920, type: 101 }
+  ],
+  image_versions2: {
+    candidates: [{ url: 'https://scontent.cdninstagram.com/v/t51/portada-1080.jpg', width: 1080, height: 1920 }]
+  }
+};
+
+const IG_CARRUSEL = {
+  code: 'DdXUMc6IBfe',
+  pk: '3987744688274037580',
+  media_type: 8,
+  user: { username: 'khetzalgg' },
+  carousel_media: [
+    {
+      media_type: 1,
+      image_versions2: {
+        candidates: [
+          { url: 'https://scontent.cdninstagram.com/v/t51/foto1-640.jpg', width: 640, height: 800 },
+          { url: 'https://scontent.cdninstagram.com/v/t51/foto1-1440.jpg', width: 1440, height: 1800 }
+        ]
+      }
+    },
+    {
+      media_type: 1,
+      image_versions2: {
+        candidates: [{ url: 'https://instagram.fymq2-1.fna.fbcdn.net/v/t51/foto2.jpg', width: 1080, height: 1350 }]
+      }
+    },
+    {
+      media_type: 2,
+      video_versions: [{ url: 'https://scontent.cdninstagram.com/v/t51/clip.mp4', width: 1080, height: 1920 }],
+      image_versions2: {
+        candidates: [{ url: 'https://scontent.cdninstagram.com/v/t51/clip-poster.jpg', width: 640, height: 1136 }]
+      }
+    }
+  ]
+};
+
+const igBridge = loadBridge({});
+
+test('reconoce la forma de los datos de Instagram', () => {
+  assert.strictEqual(igBridge.api.pareceMediaDeInstagram(IG_REEL), true);
+  assert.strictEqual(igBridge.api.pareceMediaDeInstagram(IG_CARRUSEL), true);
+  assert.strictEqual(igBridge.api.pareceMediaDeInstagram(REAL_VIDEO_MEDIA), false, 'los de X no son de IG');
+  assert.strictEqual(igBridge.api.pareceMediaDeInstagram({ hola: 1 }), false);
+});
+
+test('un reel: elige la version de video de mayor resolucion', () => {
+  const media = igBridge.api.normalizarMediaInstagram(IG_REEL);
+  assert.strictEqual(media.tipo, 'video');
+  assert.strictEqual(media.items.length, 1);
+  assert.strictEqual(media.items[0].url, 'https://scontent.cdninstagram.com/v/t51/video-1080.mp4');
+  assert.strictEqual(media.items[0].ancho, 1080);
+  assert.strictEqual(media.usuario, 'khetzalgg');
+  assert.strictEqual(media.code, 'DdXUcJaSe8X');
+  assert.ok(media.items[0].poster.includes('portada-1080'), 'usa la portada de mas resolucion');
+});
+
+test('un carrusel: devuelve todos los elementos en orden', () => {
+  const media = igBridge.api.normalizarMediaInstagram(IG_CARRUSEL);
+  assert.strictEqual(media.tipo, 'carrusel');
+  assert.strictEqual(media.items.length, 3);
+  assert.deepStrictEqual(Array.from(media.items, (i) => i.tipo), ['imagen', 'imagen', 'video']);
+  assert.strictEqual(media.items[0].url, 'https://scontent.cdninstagram.com/v/t51/foto1-1440.jpg');
+  assert.strictEqual(media.items[2].url, 'https://scontent.cdninstagram.com/v/t51/clip.mp4');
+});
+
+test('una foto suelta: elige el candidato mayor', () => {
+  const media = igBridge.api.normalizarMediaInstagram({
+    code: 'ABC123',
+    media_type: 1,
+    user: { username: 'alguien' },
+    image_versions2: {
+      candidates: [
+        { url: 'https://scontent.cdninstagram.com/v/t51/a-240.jpg', width: 240, height: 240 },
+        { url: 'https://scontent.cdninstagram.com/v/t51/a-1080.jpg', width: 1080, height: 1080 }
+      ]
+    }
+  });
+  assert.strictEqual(media.tipo, 'imagen');
+  assert.strictEqual(media.items[0].url, 'https://scontent.cdninstagram.com/v/t51/a-1080.jpg');
+});
+
+test('las URLs firmadas de IG se devuelven intactas (no se reescriben)', () => {
+  const firmada =
+    'https://scontent.cdninstagram.com/v/t51.82787-15/foto.jpg?stp=dst-jpg_e35&_nc_ht=scontent.cdninstagram.com&oh=00_AQIVhSk&oe=6AB2B388';
+  const media = igBridge.api.normalizarMediaInstagram({
+    code: 'X',
+    image_versions2: { candidates: [{ url: firmada, width: 1080, height: 1350 }] }
+  });
+  assert.strictEqual(media.items[0].url, firmada, 'debe llegar tal cual, con su firma');
+});
+
+test('el saneado descarta hosts que no son de Instagram ni de Facebook', () => {
+  const sucio = {
+    code: 'X',
+    usuario: 'u',
+    items: [
+      { tipo: 'imagen', url: 'https://scontent.cdninstagram.com/v/t51/buena.jpg', ancho: 1080, alto: 1080 },
+      { tipo: 'imagen', url: 'https://evil.example.com/mala.jpg', ancho: 4000, alto: 4000 },
+      { tipo: 'video', url: 'http://scontent.cdninstagram.com/insegura.mp4' }
+    ]
+  };
+  const limpio = igBridge.api.sanitizeInstagram(sucio);
+  assert.strictEqual(limpio.items.length, 1);
+  assert.ok(limpio.items[0].url.includes('buena.jpg'));
+});
+
+test('el saneado de IG devuelve null si no queda nada valido', () => {
+  assert.strictEqual(
+    igBridge.api.sanitizeInstagram({ items: [{ tipo: 'imagen', url: 'https://evil.example.com/x.jpg' }] }),
+    null
+  );
+  assert.strictEqual(igBridge.api.sanitizeInstagram(null), null);
+});
+
+test('hostPermitido acepta subdominios del CDN y rechaza el resto', () => {
+  assert.strictEqual(igBridge.api.hostPermitido('scontent.cdninstagram.com'), true);
+  assert.strictEqual(igBridge.api.hostPermitido('instagram.fymq2-1.fna.fbcdn.net'), true);
+  assert.strictEqual(igBridge.api.hostPermitido('video.twimg.com'), true);
+  assert.strictEqual(igBridge.api.hostPermitido('cdninstagram.com.evil.com'), false);
+  assert.strictEqual(igBridge.api.hostPermitido('example.com'), false);
 });
 
 /* ------------------------------------------------------------------ cierre -- */

@@ -859,10 +859,13 @@
    * 8. Registro en el núcleo
    * ===================================================================== */
 
-  core.registerScanner(scanImages);
-  core.registerDisableHook((cfg) => {
-    if (!cfg.imagesEnabled) cleanupImageOverlays();
-  });
+  // Solo se activa en X/Twitter: las imágenes de tweets son de pbs.twimg.com.
+  if (/(^|\.)(x|twitter)\.com$/i.test(location.hostname)) {
+    core.registerScanner(scanImages);
+    core.registerDisableHook((cfg) => {
+      if (!cfg.imagesEnabled) cleanupImageOverlays();
+    });
+  }
 
   /* -----------------------------------------------------------------------
    * Punto de enganche para las pruebas automatizadas (tools/test.js).

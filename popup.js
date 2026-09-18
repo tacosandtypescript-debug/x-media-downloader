@@ -32,7 +32,10 @@ const DEFAULT_SETTINGS = {
   compactImageButton: false,
   imageFallback: true,
   imageVerify: true,
-  imageFilenameTemplate: 'tweet_{id}_img{indice}'
+  imageFilenameTemplate: 'tweet_{id}_img{indice}',
+  /* --- Otros sitios --- */
+  instagramEnabled: true,
+  instagramFilenameTemplate: 'instagram_{usuario}_{id}_{indice}'
 };
 
 const FORMAT_HINTS = {
@@ -210,7 +213,11 @@ function readForm() {
     compactImageButton: elements.compactImageButton.checked,
     imageFallback: elements.imageFallback.checked,
     imageVerify: elements.imageVerify.checked,
-    imageFilenameTemplate: elements.imageFilenameTemplate.value.trim() || DEFAULT_SETTINGS.imageFilenameTemplate
+    imageFilenameTemplate: elements.imageFilenameTemplate.value.trim() || DEFAULT_SETTINGS.imageFilenameTemplate,
+
+    instagramEnabled: elements.instagramEnabled.checked,
+    instagramFilenameTemplate:
+      elements.instagramFilenameTemplate.value.trim() || DEFAULT_SETTINGS.instagramFilenameTemplate
   };
 }
 
@@ -237,6 +244,9 @@ function fillForm(settings) {
   elements.imageFallback.checked = !!settings.imageFallback;
   elements.imageVerify.checked = !!settings.imageVerify;
   elements.imageFilenameTemplate.value = settings.imageFilenameTemplate || DEFAULT_SETTINGS.imageFilenameTemplate;
+  elements.instagramEnabled.checked = !!settings.instagramEnabled;
+  elements.instagramFilenameTemplate.value =
+    settings.instagramFilenameTemplate || DEFAULT_SETTINGS.instagramFilenameTemplate;
 
   syncUiState();
 }
@@ -477,6 +487,8 @@ async function init() {
   elements.diagLog = $('diagLog');
   elements.diagSummary = $('diagSummary');
   elements.updateInfo = $('updateInfo');
+  elements.instagramEnabled = $('instagramEnabled');
+  elements.instagramFilenameTemplate = $('instagramFilenameTemplate');
   elements.updateApply = $('updateApply');
 
   const settings = await getStored(DEFAULT_SETTINGS);
@@ -492,7 +504,12 @@ async function init() {
       save();
     });
   });
-  [elements.folder, elements.filenameTemplate, elements.imageFilenameTemplate].forEach((input) => {
+  [
+    elements.folder,
+    elements.filenameTemplate,
+    elements.imageFilenameTemplate,
+    elements.instagramFilenameTemplate
+  ].forEach((input) => {
     input.addEventListener('input', save);
   });
   elements.folder.addEventListener('blur', () => {

@@ -90,7 +90,10 @@ const DEFAULT_SETTINGS = {
   compactImageButton: false,
   imageFallback: true,
   imageVerify: true,
-  imageFilenameTemplate: 'tweet_{id}_img{indice}'
+  imageFilenameTemplate: 'tweet_{id}_img{indice}',
+  /* --- Otros sitios --- */
+  instagramEnabled: true,
+  instagramFilenameTemplate: 'instagram_{usuario}_{id}_{indice}'
 };
 
 /** downloadId -> { tabId, filename, url }. Caché en memoria + respaldo en sesión. */

@@ -43,7 +43,7 @@ Toda la interfaz (botones, avisos y popup de opciones) está **en español**.
 - **Modo avanzado HLS**: si un video no expone ningún archivo MP4 directo, puede reconstruirse el
   stream uniendo sus segmentos en memoria (opcional, desactivado por defecto).
 
-### Imágenes
+### Imágenes de X
 
 - **Detección automática** de imágenes sueltas, **galerías de 2 a 4**, imágenes dentro de citas y
   respuestas, **tarjetas de enlace** (`card_img`, incluidas las de fondo CSS) y el visor ampliado.
@@ -69,9 +69,31 @@ Toda la interfaz (botones, avisos y popup de opciones) está **en español**.
   nativos ni la reproducción, y **no interfieren con el lightbox** (en el visor ampliado el botón
   se desplaza a la esquina inferior derecha para no tapar los controles de X).
 - **Carpeta de destino** configurable dentro de *Descargas* y opción de preguntar cada vez.
-- **Plantillas de nombre de archivo** independientes para videos e imágenes.
+- **Plantillas de nombre de archivo** independientes para videos, imágenes e Instagram.
 - **Interruptor on/off** general y otro específico para las imágenes.
 - **Avisos en español** dentro de la propia página: progreso, éxito y errores claros.
+
+### Instagram
+
+- **Publicaciones con foto, carruseles (varias fotos o vídeos) y Reels**, con botón en cada elemento
+  y **contador de posición** (`1/3`, `2/3`…).
+- **La mejor versión disponible**: para los vídeos se elige la mayor de `video_versions`
+  (p. ej. 1080×1920 frente a 720×1280) y para las fotos el mayor de `image_versions2.candidates`.
+- **Las URLs se usan tal cual**: Instagram las firma (`oh=` / `oe=`) y caducan, así que **no se
+  reescriben** (a diferencia de `pbs.twimg.com`, donde sí se cambia el tamaño pedido).
+- **Solo audio en MP3**: el MP4 de Instagram lleva el audio dentro, así que se descarga, se
+  decodifica y se recodifica a MP3. Con `M4A` se avisa y se entrega el MP4 (IG no publica la pista
+  de audio por separado).
+- **Rescate si el CDN rechaza la descarga** (403 por cookies o *referer*): se reintenta bajando los
+  bytes desde la propia página, que sí las tiene, y se guardan igual que los demás.
+- **Los módulos están separados por sitio**: `instagram.js` solo actúa en instagram.com,
+  `content.js`/`images.js` solo en X. Así no aparecen botones de un sitio en el otro.
+
+**Lo que necesitas saber:** Instagram exige sesión, así que esta parte **la tienes que probar tú**;
+yo no puedo entrar en tu cuenta. Si algo falla, abre el popup → **General** → **Copiar informe** y
+me lo pasas: el registro dice exactamente qué encontró el puente y por qué se eligió cada URL.
+Descargar contenido ajeno puede ir contra las condiciones de Instagram; automatizar mucho puede
+limitar la cuenta.
 
 ---
 

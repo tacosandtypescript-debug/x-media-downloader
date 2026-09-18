@@ -261,6 +261,36 @@
       <!-- ============================ GENERAL =========================== -->
       <section class="xvd-panel" id="panel-general" role="tabpanel" aria-labelledby="tab-general" hidden>
         <div class="xvd-card">
+          <h2>Sitios donde actúa</h2>
+          <label class="xvd-option xvd-option--check">
+            <input type="checkbox" id="instagramEnabled" />
+            <span>
+              <strong>Instagram</strong>
+              <small>Botones sobre las fotos, los carruseles y los reels de instagram.com.</small>
+            </span>
+          </label>
+          <label class="xvd-field" for="instagramFilenameTemplate">
+            <span class="xvd-field__label">Plantilla del nombre en Instagram</span>
+            <input
+              type="text"
+              id="instagramFilenameTemplate"
+              placeholder="instagram_{usuario}_{id}_{indice}"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <small class="xvd-field__help">
+              Variables: <code>{usuario}</code> <code>{id}</code> <code>{fecha}</code> <code>{indice}</code>
+              <code>{calidad}</code> <code>{ext}</code>
+            </small>
+          </label>
+          <p class="xvd-hint">
+            Los formatos y la carpeta son los mismos que en X. Ojo: el «solo audio» de Instagram se
+            consigue convirtiendo el vídeo (IG no publica la pista de audio aparte), así que en MP3
+            funciona siempre y en M4A se descarga el MP4 con un aviso.
+          </p>
+        </div>
+
+        <div class="xvd-card">
           <h2>Carpeta de descarga</h2>
           <label class="xvd-field" for="folder">
             <span class="xvd-field__label">Subcarpeta dentro de Descargas</span>

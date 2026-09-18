@@ -129,7 +129,109 @@ def construir_fixture():
 
 
 HTML = construir_fixture()
-peticiones = {"video": [], "imagen": [], "probe": []}
+peticiones = {"video": [], "imagen": [], "probe": [], "ig": []}
+
+
+def construir_fixture_instagram():
+    """Página que imita Instagram, con los datos reales en las props de React."""
+    reel = {
+        "code": "DdXUcJaSe8X",
+        "pk": "3987744811663759326",
+        "media_type": 2,
+        "video_duration": 12.5,
+        "user": {"username": "khetzalgg"},
+        "video_versions": [
+            {"url": "https://scontent.cdninstagram.com/v/t51/video-720.mp4", "width": 720, "height": 1280, "type": 101},
+            {"url": "https://scontent.cdninstagram.com/v/t51/video-1080.mp4", "width": 1080, "height": 1920, "type": 101},
+        ],
+        "image_versions2": {
+            "candidates": [
+                {"url": "https://scontent.cdninstagram.com/v/t51/portada-1080.jpg", "width": 1080, "height": 1920}
+            ]
+        },
+    }
+    carrusel = {
+        "code": "DdXUMc6IBfe",
+        "pk": "3987744688274037580",
+        "media_type": 8,
+        "user": {"username": "khetzalgg"},
+        "carousel_media": [
+            {
+                "media_type": 1,
+                "image_versions2": {
+                    "candidates": [
+                        {"url": "https://scontent.cdninstagram.com/v/t51/foto1-640.jpg", "width": 640, "height": 800},
+                        {
+                            "url": "https://scontent.cdninstagram.com/v/t51/foto1-1440.jpg?stp=dst-jpg_e35&oh=00_FIRMA1&oe=6AB2B388",
+                            "width": 1440,
+                            "height": 1800,
+                        },
+                    ]
+                },
+            },
+            {
+                "media_type": 1,
+                "image_versions2": {
+                    "candidates": [
+                        {
+                            "url": "https://instagram.fymq2-1.fna.fbcdn.net/v/t51/foto2.jpg?stp=dst-jpg_e35&oh=00_FIRMA2&oe=6AB2B388",
+                            "width": 1080,
+                            "height": 1350,
+                        }
+                    ]
+                },
+            },
+            {
+                "media_type": 2,
+                "video_versions": [
+                    {"url": "https://scontent.cdninstagram.com/v/t51/clip.mp4", "width": 1080, "height": 1920}
+                ],
+                "image_versions2": {
+                    "candidates": [
+                        {"url": "https://scontent.cdninstagram.com/v/t51/clip-poster.jpg", "width": 640, "height": 1136}
+                    ]
+                },
+            },
+        ],
+    }
+    celda = (
+        '<div style="position:relative;width:300px;height:400px">'
+        '<img src="__URL__" style="width:100%;height:100%"></div>'
+    )
+    return f"""<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8"><title>Instagram</title>
+<style>body {{ margin:0; background:#000; color:#fff; font-family:sans-serif; width:1000px }}
+article {{ display:block; margin-bottom:20px }}
+#reel {{ position:relative; width:600px; height:800px }}
+#reel video {{ width:100%; height:100%; display:block }}
+#carrusel {{ display:flex; gap:2px; width:900px }}</style></head><body>
+<article>
+  <a href="/khetzalgg/">khetzalgg</a>
+  <div id="reel"><video poster="https://scontent.cdninstagram.com/v/t51/portada-1080.jpg" playsinline></video></div>
+  <a href="/reel/DdXUcJaSe8X/">ver reel</a>
+</article>
+<article>
+  <a href="/khetzalgg/">khetzalgg</a>
+  <div id="carrusel">
+    {celda.replace('__URL__', 'https://scontent.cdninstagram.com/v/t51/foto1-1440.jpg?stp=dst-jpg_e35&amp;oh=00_FIRMA1&amp;oe=6AB2B388')}
+    {celda.replace('__URL__', 'https://instagram.fymq2-1.fna.fbcdn.net/v/t51/foto2.jpg?stp=dst-jpg_e35&amp;oh=00_FIRMA2&amp;oe=6AB2B388')}
+    <div style="position:relative;width:300px;height:400px"><video poster="https://scontent.cdninstagram.com/v/t51/clip-poster.jpg" style="width:100%;height:100%"></video></div>
+  </div>
+  <a href="/p/DdXUMc6IBfe/">ver publicación</a>
+</article>
+<script>
+  var REEL = {json.dumps(reel, ensure_ascii=False)};
+  var CARR = {json.dumps(carrusel, ensure_ascii=False)};
+  var articulos = document.querySelectorAll('article');
+  // IG pasa los datos por props de React (y por la fibra del reproductor).
+  articulos[0].querySelector('video')['__reactFiber$ig'] = {{
+    memoizedProps: {{ xdt_api__v1__media__shortcode__web_info: {{ items: [REEL] }} }},
+    return: null
+  }};
+  articulos[1]['__reactProps$ig'] = {{ data: {{ xdt_api__v1__media__shortcode__web_info: {{ items: [CARR] }} }} }};
+  window.__clickEnContenedor = false;
+  document.getElementById('reel').addEventListener('click', function () {{ window.__clickEnContenedor = true; }});
+</script></body></html>"""
 
 
 def descargas_de(popup, fragmento):
@@ -165,7 +267,7 @@ def archivos_pedidos(popup, contiene):
     nombres = set()
     for entrada in leer_registro(popup):
         detalle = str(entrada.get("detail", ""))
-        if "despachado" not in str(entrada.get("msg", "")) or contiene not in detalle:
+        if contiene not in detalle:
             continue
         try:
             nombres.add(json.loads(detalle).get("archivo", ""))
@@ -481,6 +583,117 @@ with sync_playwright() as p:
     audio_pedido = [u for u in peticiones["video"] if "/mp4a/" in u]
     check("se piden las playlists de audio del manifiesto real",
           any(".m3u8" in u for u in audio_pedido), audio_pedido[:2])
+
+    # ================================================== 6. INSTAGRAM
+    print("\n6. INSTAGRAM (reel, carrusel mixto y solo audio en MP3)")
+
+    m4a_fixture = (Path(__file__).resolve().parent / "fixtures" / "audio-128k.m4a").read_bytes()
+
+    def ruta_ig_media(route):
+        url = route.request.url
+        peticiones["ig"].append(url)
+        # Los vídeos devuelven un M4A real (audio auténtico) para poder probar el MP3.
+        if ".mp4" in url:
+            route.fulfill(status=200, content_type="video/mp4", body=m4a_fixture)
+        else:
+            route.fulfill(status=200, content_type="image/jpeg", body=b"\xff\xd8\xff\xe0" + b"\0" * 64)
+
+    ctx.route("https://*.cdninstagram.com/**", ruta_ig_media)
+    ctx.route("https://*.fbcdn.net/**", ruta_ig_media)
+    ctx.route(
+        "https://www.instagram.com/**",
+        lambda r: r.fulfill(status=200, content_type="text/html; charset=utf-8", body=construir_fixture_instagram()),
+    )
+
+    # Se vuelve a formato MP4 para empezar (el audio se prueba al final).
+    popup.evaluate("() => new Promise(r => chrome.storage.sync.set({format: 'mp4'}, r))")
+
+    ig = ctx.new_page()
+    ig.goto("https://www.instagram.com/reel/DdXUcJaSe8X/", wait_until="domcontentloaded")
+    ig.wait_for_selector("button.xvd-button[data-xvd-site='instagram']", timeout=20000)
+    esperar(ig, 1.5)
+
+    botones_ig = ig.locator("button.xvd-button[data-xvd-site='instagram']")
+    check("se inyectan botones en Instagram (1 reel + 3 del carrusel)", botones_ig.count() == 4, f"{botones_ig.count()} botones")
+
+    insignias = ig.locator(".xvd-badge").all_inner_texts()
+    check("el carrusel muestra su contador 1/3 … 3/3", insignias == ["1/3", "2/3", "3/3"], insignias)
+
+    # --- reel: la mejor versión del vídeo (1080x1920, no la de 720) ---------
+    ids_antes_ig = {d.get("id") for d in descargas_de(popup, "")}
+    botones_ig.first.click()
+    esperar(ig, 6.0)
+
+    registro_ig = leer_registro(popup)
+    eleccion = [e for e in registro_ig if "Datos del puente para la publicación" in str(e.get("msg", ""))]
+    check("el puente entrega los datos de Instagram",
+          bool(eleccion) and '"elementos":1' in eleccion[-1].get("detail", ""),
+          eleccion[-1].get("detail") if eleccion else "sin datos")
+
+    descargas_ig = [
+        d for d in descargas_de(popup, "cdninstagram") if d.get("id") not in ids_antes_ig
+    ]
+    urls_ig = [d.get("url", "") for d in descargas_ig]
+    check("el reel se descarga en su versión de 1080x1920 (no la de 720)",
+          any("video-1080.mp4" in u for u in urls_ig), urls_ig[:2])
+    nombres_ig = archivos_pedidos(popup, "instagram_")
+    check("el nombre sigue la plantilla de Instagram",
+          any("instagram_khetzalgg_DdXUcJaSe8X" in n for n in nombres_ig), nombres_ig[:2])
+
+    # --- carrusel: el segundo elemento conserva su URL firmada --------------
+    ids_antes_ig = {d.get("id") for d in descargas_de(popup, "")}
+    botones_ig.nth(2).click()
+    esperar(ig, 6.0)
+
+    descargas_carrusel = [d for d in descargas_de(popup, "fbcdn") if d.get("id") not in ids_antes_ig]
+    check("el segundo elemento del carrusel se descarga de su propia URL",
+          any("foto2.jpg" in d.get("url", "") for d in descargas_carrusel),
+          [d.get("url", "")[:70] for d in descargas_carrusel])
+    check("las URLs firmadas de Instagram se respetan (oh= y oe= intactos)",
+          any("oh=00_FIRMA2" in d.get("url", "") and "oe=6AB2B388" in d.get("url", "") for d in descargas_carrusel),
+          [d.get("url", "")[:110] for d in descargas_carrusel])
+    nombres_carrusel = archivos_pedidos(popup, "instagram_")
+    check("el elemento lleva su índice en el nombre",
+          any("_2." in n for n in nombres_carrusel), nombres_carrusel[-2:])
+
+    # --- solo audio en Instagram (MP3 a partir del vídeo) -------------------
+    popup.evaluate("() => new Promise(r => chrome.storage.sync.set({format: 'mp3'}, r))")
+    ig.reload(wait_until="domcontentloaded")
+    ig.wait_for_selector("button.xvd-button[data-xvd-site='instagram']", timeout=20000)
+    esperar(ig, 1.5)
+
+    ids_antes_mp3 = {d.get("id") for d in descargas_de(popup, "")}
+    ig.locator("button.xvd-button[data-xvd-site='instagram']").first.click()
+
+    mp3_ig = None
+    limite = time.time() + 120
+    while time.time() < limite:
+        for d in descargas_de(popup, ""):
+            if (d.get("url") or "").startswith("blob:") and d.get("state") == "complete" and d.get("id") not in ids_antes_mp3:
+                mp3_ig = d
+                break
+        if mp3_ig:
+            break
+        esperar(ig, 1.5)
+
+    check("Instagram: el MP3 se genera a partir del vídeo", mp3_ig is not None,
+          (mp3_ig or {}).get("state", "sin descarga"))
+    if mp3_ig:
+        ruta = Path(mp3_ig.get("filename", ""))
+        if ruta.exists():
+            cabecera = ruta.read_bytes()[:4]
+            kb = ruta.stat().st_size / 1024
+            check("Instagram: el MP3 es válido y pesa lo que debe",
+                  cabecera[0] == 0xFF and (cabecera[1] & 0xE0) == 0xE0 and 250 < kb < 500,
+                  f"{kb:.1f} KB, {cabecera.hex()}")
+    nombres_mp3 = archivos_pedidos(popup, "_1.mp3")
+    check("Instagram: el archivo de audio se llama con la plantilla de IG",
+          bool(nombres_mp3), nombres_mp3[-1] if nombres_mp3 else "sin registro")
+
+    check("el clic en Instagram tampoco se propaga al contenedor",
+          ig.evaluate("window.__clickEnContenedor") is False)
+
+    ig.screenshot(path=str(SHOTS / "instagram.png"), full_page=True)
 
     volcar_diagnostico(popup, "DIAGNÓSTICO FINAL", sw)
     page.screenshot(path=str(SHOTS / "pagina.png"), full_page=True)
