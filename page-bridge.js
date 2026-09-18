@@ -748,6 +748,146 @@
   }
 
   /* =======================================================================
+   * 2e. Pixabay
+   *
+   * Pixabay es una web con React y sus datos de arranque van en
+   * `window.__BOOTSTRAP__.page` (invisible desde el mundo aislado, de ahí el
+   * puente). Ahí está TODO lo que hace falta, ya declarado por la propia web:
+   *   - `mediaItem`  → el medio de la ficha abierta.
+   *   - `results`    → los medios del listado o de la búsqueda.
+   *   - `heroMediaItems`, `featuredArtists[].media`, `bannerMedia` → destacados.
+   *   - `sponsoredImages` / `sponsoredVideos` → son de iStock (de pago): NO se tocan.
+   *
+   * Cada medio trae `sources` con las URLs del CDN (que es lo que se puede
+   * descargar sin iniciar sesión) y `downloadSources` con los tamaños que
+   * ofrece la web. Aquí solo se devuelven las URLs del CDN sin tocar.
+   * ===================================================================== */
+
+  /** ¿Es una URL del CDN de Pixabay? */
+  function esUrlDePixabay(url) {
+    if (typeof url !== 'string' || !/^https:\/\//i.test(url)) return false;
+    try {
+      const host = new URL(url).hostname.toLowerCase();
+      return host === 'pixabay.com' || host.endsWith('.pixabay.com');
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function tipoDeMedioPixabay(item) {
+    const tipo = String((item && item.mediaType) || '').toLowerCase();
+    if (tipo === 'audio') return 'audio';
+    if (tipo === 'video') return 'video';
+    if (tipo === 'photo' || tipo === 'illustration' || tipo === 'vector') return 'photo';
+    if (item && item.vector === true) return 'photo';
+    return '';
+  }
+
+  /** Normaliza un medio de Pixabay (mediaItem o uno de los resultados). */
+  function normalizarMedioPixabay(item) {
+    if (!item || typeof item !== 'object') return null;
+    const id = Number(item.id);
+    if (!id) return null;
+
+    const tipo = tipoDeMedioPixabay(item);
+    if (!tipo) return null;
+
+    const fuentes = item.sources && typeof item.sources === 'object' ? item.sources : {};
+    let url = '';
+
+    if (tipo === 'audio') {
+      // En la ficha, downloadUrl es absoluta y del CDN (baja con nombre bonito);
+      // en los listados es una ruta relativa, así que se usa el mp3 directo.
+      url = [fuentes.downloadUrl, fuentes.src].find(esUrlDePixabay) || '';
+    } else if (tipo === 'video') {
+      url = [fuentes.mp4, fuentes.embed, fuentes.thumbnail].find(esUrlDePixabay) || '';
+    } else {
+      url = [fuentes['2x'], fuentes['1x'], item.src, fuentes.downloadUrl].find(esUrlDePixabay) || '';
+    }
+
+    if (!url) return null;
+
+    return {
+      id: String(id),
+      tipo,
+      url,
+      nombre: String(item.name || item.title || '').slice(0, 160),
+      autor: String((item.user && item.user.username) || '').slice(0, 80),
+      ancho: Number(item.width) || 0,
+      alto: Number(item.height) || 0,
+      duracion: Math.round(Number(item.duration) || 0),
+      href: String(item.href || '').slice(0, 200),
+      mp3: esUrlDePixabay(fuentes.downloadUrl) ? fuentes.downloadUrl : '',
+      formato: String(item.fileFormat || '').slice(0, 10)
+    };
+  }
+
+  /** Reúne los medios que declara la propia página (sin los anuncios de iStock). */
+  function mediosDePixabay() {
+    const bootstrap = window.__BOOTSTRAP__;
+    const pagina = bootstrap && bootstrap.page;
+    if (!pagina || typeof pagina !== 'object') return [];
+
+    const candidatos = [];
+    const empujar = (valor) => {
+      if (Array.isArray(valor)) {
+        for (const uno of valor) candidatos.push(uno);
+      } else if (valor && typeof valor === 'object') {
+        candidatos.push(valor);
+      }
+    };
+
+    // El medio de la ficha abierta va primero (es el importante).
+    empujar(pagina.mediaItem);
+    empujar(pagina.relatedMedia);
+    empujar(pagina.results);
+    empujar(pagina.heroMediaItems);
+    empujar(pagina.bannerMedia);
+    if (Array.isArray(pagina.featuredArtists)) {
+      for (const artista of pagina.featuredArtists) {
+        if (artista && typeof artista === 'object') empujar(artista.media);
+      }
+    }
+    // `curatedPlaylists` son listas: cada una puede traer sus pistas.
+    if (Array.isArray(pagina.curatedPlaylists)) {
+      for (const lista of pagina.curatedPlaylists) {
+        if (lista && typeof lista === 'object') empujar(lista.media || lista.audios || lista.items);
+      }
+    }
+
+    const vistos = new Set();
+    const medios = [];
+    for (const candidato of candidatos) {
+      const medio = normalizarMedioPixabay(candidato);
+      if (!medio || vistos.has(medio.id + medio.tipo)) continue;
+      vistos.add(medio.id + medio.tipo);
+      medios.push(medio);
+      if (medios.length >= 150) break;
+    }
+    return medios;
+  }
+
+  /** Saneado: solo URLs de pixabay.com y campos de longitud razonable. */
+  function sanitizePixabay(medio) {
+    if (!medio || !esUrlDePixabay(medio.url)) return null;
+    const tipo = ['audio', 'video', 'photo'].indexOf(medio.tipo) >= 0 ? medio.tipo : '';
+    if (!tipo) return null;
+    return {
+      id: String(medio.id || '').slice(0, 24),
+      tipo,
+      url: medio.url,
+      mp3: esUrlDePixabay(medio.mp3) ? medio.mp3 : '',
+      nombre: String(medio.nombre || '').slice(0, 160),
+      autor: String(medio.autor || '').slice(0, 80),
+      ancho: Number(medio.ancho) || 0,
+      alto: Number(medio.alto) || 0,
+      duracion: Math.round(Number(medio.duracion) || 0),
+      href: String(medio.href || '').slice(0, 200),
+      formato: String(medio.formato || '').slice(0, 10)
+    };
+  }
+
+  /* =======================================================================
    * 3. Saneado de la respuesta (defensa frente a mensajes falsificados)
    * ===================================================================== */
 
@@ -838,6 +978,22 @@
       return;
     }
 
+    // --- Pixabay ----------------------------------------------------------
+    if (data.sitio === 'pixabay') {
+      let medios = [];
+      try {
+        medios = mediosDePixabay().map(sanitizePixabay).filter(Boolean);
+      } catch (_) {
+        medios = [];
+      }
+      try {
+        window.postMessage({ [MARK]: true, kind: 'response', sitio: 'pixabay', requestId, medios }, '*');
+      } catch (_) {
+        /* respuesta no clonable */
+      }
+      return;
+    }
+
     // --- Facebook --------------------------------------------------------
     if (data.sitio === 'facebook') {
       let medios = [];
@@ -906,7 +1062,12 @@
       deepCollectFacebook,
       dedupeFacebook,
       sanitizeFacebook,
-      imagenDeFacebook
+      imagenDeFacebook,
+      // Pixabay
+      esUrlDePixabay,
+      normalizarMedioPixabay,
+      mediosDePixabay,
+      sanitizePixabay
     };
   }
 })();

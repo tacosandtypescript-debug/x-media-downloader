@@ -38,8 +38,18 @@
   const IMAGE_ATTR = 'data-xvd-image';
   const TOASTS_ID = 'xvd-toasts';
 
-  /** Versión del núcleo (se muestra en el diagnóstico del popup). */
-  const coreVersion = '2.6.0';
+  /**
+   * Versión del núcleo (se muestra en el diagnóstico del popup). Se toma del
+   * manifiesto para que no haya que acordarse de cambiarla a mano en cada
+   * versión; si no se puede leer, queda la última conocida.
+   */
+  const coreVersion = (() => {
+    try {
+      return chrome.runtime.getManifest().version || '2.8.0';
+    } catch (_) {
+      return '2.8.0';
+    }
+  })();
 
   const DEFAULT_SETTINGS = {
     /* --- General --- */
@@ -74,6 +84,8 @@
     youtubeFilenameTemplate: 'youtube_{usuario}_{titulo}_{id}',
     youtubeCodec: 'h264',          // h264 (compatible) | max (VP9/AV1, más calidad)
     youtubeCookies: false,         // usar las cookies de Chrome (vídeos con restricción)
+    pixabayEnabled: true,          // botones también en Pixabay
+    pixabayFilenameTemplate: 'pixabay_{usuario}_{nombre}_{id}',
     /* --- Organización --- */
     folderHistory: []              // carpetas recordadas para elegirlas en el popup
   };
@@ -317,6 +329,12 @@
   /** Pide al puente los medios de un vídeo o foto de Facebook (por su id). */
   async function requestFacebookMedia(objetivo, timeoutMs) {
     const respuesta = await pedirAlPuente({ sitio: 'facebook', objetivo: objetivo || '' }, timeoutMs);
+    return respuesta && Array.isArray(respuesta.medios) ? respuesta.medios : [];
+  }
+
+  /** Pide al puente los medios que declara la propia página de Pixabay. */
+  async function requestPixabayMedia(timeoutMs) {
+    const respuesta = await pedirAlPuente({ sitio: 'pixabay' }, timeoutMs);
     return respuesta && Array.isArray(respuesta.medios) ? respuesta.medios : [];
   }
 
@@ -2336,6 +2354,7 @@
     pedirAlPuente,
     requestInstagramMedia,
     requestFacebookMedia,
+    requestPixabayMedia,
     fetchBytes,
     convertirMp3,
     guardarBytes: enviarBytesAGuardar,

@@ -1,10 +1,10 @@
 # Descargador de medios para X (Twitter)
 
 Extensión de Chrome bajo **Manifest V3** que añade un botón flotante **«Descargar»** sobre los
-**videos** y las **imágenes** publicados en X (Twitter), **Instagram**, **Facebook** y **YouTube**,
-permitiendo guardarlos en la **máxima calidad o resolución disponible** y en el **formato
-configurable** por el usuario (MP4, WebM, M4A o MP3), con **carpetas de destino** y plantillas de
-nombre.
+**videos** y las **imágenes** publicados en X (Twitter), **Instagram**, **Facebook**, **YouTube** y
+**Pixabay** (fotos, vídeos y música), permitiendo guardarlos en la **máxima calidad o resolución
+disponible** y en el **formato configurable** por el usuario (MP4, WebM, M4A o MP3), con **carpetas de
+destino** y plantillas de nombre.
 
 Toda la interfaz (botones, avisos y popup de opciones) está **en español**.
 
@@ -30,7 +30,6 @@ Toda la interfaz (botones, avisos y popup de opciones) está **en español**.
 11. [Solución de problemas](#solución-de-problemas)
 12. [Desarrollo](#desarrollo)
 13. [Criterios de aceptación](#criterios-de-aceptación)
-
 ---
 
 ## Características
@@ -109,7 +108,6 @@ si algo falla, popup → **General** → **Copiar informe** y me lo pasas.
 **Cómo funciona (y por qué así).** La extensión **no descarga YouTube**: le pasa el trabajo a
 **yt-dlp**, que se instala una sola vez en tu equipo con `Instalar yt-dlp para X media.cmd`. El motivo
 está medido contra YouTube real (septiembre de 2026):
-
 - El reproductor web ya **no recibe URLs de archivo**. Usa **SABR** (`serverAbrStreamingUrl`, con
   respuestas `application/vnd.yt-ump`) y los formatos adaptativos llegan **sin `url` y sin
   `signatureCipher`**; el único progresivo (itag 18) llega **cifrado**.
@@ -133,6 +131,28 @@ registra en tu usuario (Chrome, Chromium y Edge).
 > con licencia libre o descargas que YouTube permite. Por el mismo motivo, una extensión así no
 > pasaría la revisión de la Chrome Web Store.
 
+### Pixabay (fotos, vídeos y música)
+
+- **Fotos, ilustraciones, vectores, vídeos y música/efectos**, con botón en cada tarjeta de los
+  listados y en las fichas.
+- **Música: el MP3 original del CDN** (256 kbps), tal cual, **sin recomprimir**.
+- **Vídeos: MP4 hasta 4K** (`_large`), con los tamaños intermedios de 1440p, 1080p y 720p.
+- **Fotos: hasta 1280 px** por CDN. Los tamaños mayores (`_1920` y el original) los sirve la web solo
+  tras su captcha o con sesión iniciada; la extensión los intenta primero y, si el CDN los rechaza
+  (403), baja automáticamente el mayor que sí funcione, avisando del tamaño real.
+- **En las fichas** el botón se coloca junto al «Free download» de la propia web; en las filas de
+  música, en línea con sus demás acciones.
+- **No toca los «sponsored» de iStock** (contenido de pago): el puente solo lee los resultados de
+  Pixabay.
+
+**Por qué aquí sí se puede descargar y en YouTube no.** Pixabay **publica las URLs de su CDN** en los
+datos de la propia página (`window.__BOOTSTRAP__.page`), y su
+[licencia de contenido](https://pixabay.com/service/license-summary/) permite descargar y reutilizar
+los medios (con sus condiciones: nada de revender copias sin cambios, etc.). La extensión no rompe
+ninguna protección: usa exactamente lo que la web ya ofrece, y solo pone el botón, la carpeta y el
+nombre. Lo único que se comprueba antes de descargar es que el archivo exista de verdad, para no
+bajar un 403 disfrazado de archivo.
+
 ### Comunes
 
 - **Botones flotantes** con el estilo visual de X, que no bloquean ni modifican los controles
@@ -140,9 +160,9 @@ registra en tu usuario (Chrome, Chromium y Edge).
   se desplaza a la esquina inferior derecha para no tapar los controles de X).
 - **Organización por carpetas**: elige o crea la carpeta de destino desde el popup y todo lo que
   descargues se guarda ahí. Ver «Organización por carpetas» más abajo.
-- **Plantillas de nombre de archivo** independientes para X (vídeo e imagen), Instagram, Facebook y
-  YouTube.
-- **Interruptor on/off** general y otros por sitio (imágenes, Instagram, Facebook, YouTube).
+- **Plantillas de nombre de archivo** independientes para X (vídeo e imagen), Instagram, Facebook,
+  YouTube y Pixabay.
+- **Interruptor on/off** general y otros por sitio (imágenes, Instagram, Facebook, YouTube, Pixabay).
 - **Avisos en español** dentro de la propia página: progreso, éxito y errores claros.
 
 ---
@@ -220,7 +240,7 @@ limitar la cuenta.
 7. Abre o **recarga** `https://x.com/` (las pestañas abiertas antes de instalar no tienen los
    content scripts; el popup intenta inyectarlos, pero una recarga es lo más fiable).
 8. **Solo para YouTube**: ejecuta una vez **`Instalar yt-dlp para X media.cmd`** (doble clic). Compila
-   e instala el servicio local de descargas. No hace falta para X, Instagram ni Facebook, y no
+   e instala el servicio local de descargas. No hace falta para X, Instagram, Facebook ni Pixabay, y no
    necesita permisos de administrador.
 
 > Navegadores compatibles: Chrome 102 o superior, Edge, Brave y cualquier derivado de Chromium con
@@ -363,6 +383,7 @@ x-video-downloader/
 ├── instagram.js         Módulo de INSTAGRAM (fotos, carruseles, reels)
 ├── facebook.js          Módulo de FACEBOOK (vídeo, reels, fotos y audio del DASH)
 ├── youtube.js           Módulo de YOUTUBE (delega la descarga en yt-dlp)
+├── pixabay.js           Módulo de PIXABAY (fotos, vídeos y música del CDN)
 ├── background.js        Service worker: descargas, registro y puente con el host nativo
 ├── popup.html           Popup con pestañas Videos | Imágenes | General
 ├── popup.js             Lógica del popup (chrome.storage.sync)
@@ -378,11 +399,13 @@ x-video-downloader/
 │   └── icon128.png      Icono de instalación / Chrome Web Store
 ├── tools/
 │   ├── make-icons.js    Generador de iconos sin dependencias (opcional)
-│   ├── test.js          Pruebas de la lógica pura (94 comprobaciones)
+│   ├── test.js          Pruebas de la lógica pura (114 comprobaciones)
 │   ├── check-popup.js   Comprobación de coherencia popup.html ↔ popup.js
 │   ├── test-host.js     Prueba del host nativo sin Chrome (protocolo y descargas reales)
 │   ├── e2e-test.py      Prueba end-to-end de X, Instagram y Facebook (66 comprobaciones)
 │   ├── e2e-youtube.py   Prueba end-to-end de YouTube con red real y ffprobe (23 comprobaciones)
+│   ├── e2e-pixabay.py   Prueba end-to-end de Pixabay con el CDN real (19 comprobaciones)
+│   ├── e2e-pixabay-real.py  Prueba de humo contra la web real de Pixabay (8 comprobaciones)
 │   ├── build-audio-test.js  Une la pista de audio de un HLS a un M4A (para pruebas)
 │   └── fixtures/
 │       └── tweet-video-2100475914182107353.json   Tweet real usado como fixture
@@ -639,7 +662,7 @@ segundos por combinación de imagen + resolución + formato.
 | `activeTab` | Inyectar los content scripts bajo demanda si la pestaña ya estaba abierta. |
 | `scripting` | Reinyectar `content.js`/`images.js`/`styles.css` en pestañas de X abiertas antes de instalar. |
 | `nativeMessaging` | **Solo YouTube**: hablar con el servicio local de yt-dlp (`native/ytdlp-host.cs`) para lanzar la descarga y recibir el progreso. Sin ese servicio instalado no se usa para nada. |
-| `host_permissions` | X (`x.com`, `twitter.com`, `pbs.twimg.com`), Instagram (`instagram.com`, `cdninstagram.com`) y Facebook (`facebook.com`, `fb.watch`). `fbcdn.net` lo comparten IG y FB. **YouTube no está**: no se hace ninguna petición desde la extensión, solo se le pasa la URL a yt-dlp. |
+| `host_permissions` | X (`x.com`, `twitter.com`, `pbs.twimg.com`), Instagram (`instagram.com`, `cdninstagram.com`) y Facebook (`facebook.com`, `fb.watch`). `fbcdn.net` lo comparten IG y FB. **YouTube ni Pixabay están**: en YouTube no se hace ninguna petición (la URL se le pasa a yt-dlp) y en Pixabay basta con las URLs que la propia web publica en su CDN, que además manda CORS. |
 
 - **No** se recopila, envía ni analiza ningún dato. No hay servidores propios ni telemetría.
 - **No** se solicitan permisos amplios (`<all_urls>`, `webRequest`, `tabs`, `cookies`…).
@@ -702,6 +725,26 @@ segundos por combinación de imagen + resolución + formato.
   descarga normal; si es un directo en curso puede tardar o fallar.
 - **Es la única parte que sale del navegador:** el resto de sitios se descargan dentro de la extensión.
 
+### Pixabay
+
+- **Las fotos llegan hasta 1280 px.** Lo que la web anuncia como «Large» (1920) y «Original» (hasta
+  4228 px en el ejemplo probado) lo sirve **solo tras su captcha o con sesión iniciada**; por CDN esos
+  tamaños responden **403**. La extensión los intenta, detecta el 403 y baja el mayor disponible,
+  diciéndolo en el aviso. Si tienes sesión iniciada en Pixabay y la web te da la URL grande, se usa esa.
+- **El «Original» de los vídeos** que anuncia la web (208 MB para un 4K) no está en el CDN: su ruta
+  responde HTML. El mayor tamaño útil es `_large` (4K, ~24 MB en el vídeo probado).
+- **Los vídeos de Pixabay suelen ir sin sonido** (son clips de archivo). Para audio, usa la sección de
+  música: si pides MP3/M4A sobre un vídeo, la extensión lo avisa y no descarga nada.
+- **Contenido de pago (iStock):** los bloques «sponsored» que Pixabay intercala son de iStock y **no se
+  tocan**; la extensión solo lee los resultados de Pixabay.
+- **Cloudflare:** si la web te muestra un «Un momento…» al abrirla, espera a que pase; hasta entonces no
+  hay datos que leer y no aparecerán botones.
+- **MP3 en vez de M4A:** Pixabay publica el audio en MP3 (256 kbps). Si pides M4A, se avisa y se baja el
+  MP3 original, que es justo lo que ofrece la web.
+- **Licencia:** el contenido es gratuito y reutilizable, pero **no** se pueden revender copias sin
+  cambios ni redistribuirlo como banco de imágenes. Respeta
+  [sus condiciones](https://pixabay.com/service/license-summary/).
+
 ---
 
 ## Solución de problemas
@@ -728,6 +771,10 @@ segundos por combinación de imagen + resolución + formato.
 | YouTube: el MP3 o el vídeo unido fallan | Falta **ffmpeg**. Se instala con `winget install Gyan.FFmpeg` (el popup lo indica). |
 | YouTube: «no se encuentra yt-dlp» tras instalarlo | El instalador lo dice también: usa `winget install yt-dlp.yt-dlp` y vuelve a ejecutarlo. |
 | YouTube: la descarga tarda mucho | Un 4K con audio ronda los 200 MB. Baja la calidad en el popup (pestaña **Videos** → calidad mínima) o usa M4A para solo audio. |
+| Pixabay: no aparece ningún botón | Si la web muestra «Un momento…» (reto de Cloudflare), espera a que termine y recarga. Si sigue igual, el registro dirá si el puente no encontró datos. |
+| Pixabay: la foto baja a 1280 px en vez del original | Es lo máximo que sirve su CDN sin sesión: los tamaños mayores necesitan iniciar sesión en la web o pasar su captcha. Prueba a iniciar sesión y volver a intentarlo. |
+| Pixabay: «No se pudo descargar… ningún tamaño» | El CDN rechazó todos los tamaños (403). Pasa con fotos cuyo `_1280` tampoco esté publicado; el registro de diagnóstico indica cuáles se probaron. |
+| Pixabay: pido MP3/M4A en un vídeo y no descarga | Los clips de vídeo de Pixabay van sin sonido: usa la sección de música para audio. |
 
 Los mensajes de error del service worker se traducen desde los códigos de `chrome.downloads`
 (`NETWORK_FAILED`, `SERVER_FORBIDDEN`, `FILE_NO_SPACE`, `USER_CANCELED`, …).
@@ -753,7 +800,7 @@ Los mensajes de error del service worker se traducen desde los códigos de `chro
 - Ejecutar las pruebas (Node 18+, sin dependencias):
 
   ```bash
-  node tools/test.js        # 94 pruebas: variantes, calidad, nombres, HLS, imágenes, puente, carpetas y YouTube
+  node tools/test.js        # 114 pruebas: variantes, calidad, nombres, HLS, imágenes, puente, carpetas, YouTube y Pixabay
   node tools/check-popup.js # coherencia popup.html ↔ popup.js, pestañas y estructura HTML
   ```
 
@@ -799,6 +846,18 @@ Los mensajes de error del service worker se traducen desde los códigos de `chro
   imagen H.264 y sonido AAC, que el M4A es solo audio AAC, que el MP3 es MPEG válido, que todo cae en
   la carpeta elegida y con la plantilla de nombre, que el registro no tiene errores y que en Shorts el
   botón se coloca a la izquierda. Borra los archivos que descarga.
+
+  ```bash
+  python tools/e2e-pixabay.py         # Pixabay con el CDN real (19 comprobaciones)
+  python tools/e2e-pixabay-real.py    # Pixabay de verdad, con ventana (8 comprobaciones)
+  ```
+
+  `e2e-pixabay.py` sirve una página que imita el DOM y los datos de Pixabay (así no depende del captcha
+  de Cloudflare) y **descarga del CDN real**: comprueba con ffprobe que la foto acaba en 1280 px cuando
+  el 1920 responde 403, que el vídeo respeta la calidad mínima configurada, que el audio es el MP3
+  original, que todo cae en la carpeta y con el nombre de la plantilla y que en una ficha el botón se
+  coloca junto al «Free download» de la web. `e2e-pixabay-real.py` repite lo esencial **contra
+  pixabay.com de verdad** (necesita ventana, porque el reto de Cloudflare no pasa en modo oculto).
 
   > Nota: las descargas que lanza `chrome.downloads` **no** pasan por el interceptor de Playwright,
   > así que el vídeo se descarga de verdad desde X. Las imágenes usan rutas de prueba (`XVDTESTIMG…`)
@@ -849,6 +908,7 @@ Los mensajes de error del service worker se traducen desde los códigos de `chro
 | Permisos mínimos | ✅ `downloads`, `storage`, `activeTab`, `scripting`, `nativeMessaging` (solo YouTube) + hosts de X, Instagram y Facebook |
 | Interfaz íntegramente en español | ✅ botones, avisos y popup con pestañas |
 | Arquitectura modular (video ≠ imágenes) | ✅ `content.js` (núcleo + video) e `images.js` (imágenes) sobre `__XVD_CORE__` |
+| Sitios soportados | ✅ X, Instagram, Facebook, YouTube (con yt-dlp) y Pixabay (fotos, vídeos y música) |
 
 ### YouTube
 
@@ -864,9 +924,23 @@ Los mensajes de error del service worker se traducen desde los códigos de `chro
 | El saneado de carpetas no permite salir de Descargas | ✅ probado en el propio host (`../fuera`, `C:\Windows` → dentro de Descargas) |
 | No inventa: si no hay yt-dlp, lo dice y explica cómo instalarlo | ✅ aviso en el popup y en la página, sin fallar en silencio |
 
+### Pixabay
+
+| Criterio | Estado |
+| --- | --- |
+| Botones en fotos, vídeos y música | ✅ **verificado contra la web real**: 100 botones en un listado de imágenes y 12 en el de música (en línea con sus acciones) |
+| El botón no estorba ni navega | ✅ en las fichas va junto al «Free download» de la web; en las tarjetas, sobre la miniatura; el clic no se propaga |
+| Se elige el mayor tamaño descargable de verdad | ✅ **verificado con ffprobe**: con `_1920` → 403, baja `_1280` (1280×800 real) y lo dice en el aviso |
+| Vídeos hasta 4K del CDN | ✅ MP4 `_tiny`/`_small`/`_medium`/`_large` (720p/1080p/1440p/2160p) comprobados uno a uno |
+| Solo audio sin recomprimir | ✅ **verificado con ffprobe**: el MP3 original del CDN (audio:mp3, 48 kHz), sin tocar |
+| La carpeta y la plantilla del popup se respetan | ✅ `Descargas/XVD Pixabay E2E/pixabay_Himmelstraeume_Bachalpsee, Lake, Mountains_7572681.jpg` |
+| No toca el contenido de pago | ✅ los bloques «sponsored» de iStock se ignoran (probado en las pruebas unitarias) |
+| Funciona con la web real, no solo con una maqueta | ✅ `tools/e2e-pixabay-real.py` descarga una foto y una pista **de pixabay.com** de verdad |
+
 ---
 
 ## Licencia
 
-Uso personal y educativo. Respeta los términos de servicio de X y los derechos de autor del
-contenido que descargues: descarga únicamente material propio o con permiso explícito.
+Uso personal y educativo. Respeta los términos de servicio de cada web y los derechos de autor del
+contenido que descargues: descarga únicamente material propio, con permiso explícito o con licencia
+que lo permita (el de Pixabay lo permite, con sus condiciones).

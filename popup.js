@@ -42,6 +42,8 @@ const DEFAULT_SETTINGS = {
   youtubeFilenameTemplate: 'youtube_{usuario}_{titulo}_{id}',
   youtubeCodec: 'h264',
   youtubeCookies: false,
+  pixabayEnabled: true,
+  pixabayFilenameTemplate: 'pixabay_{usuario}_{nombre}_{id}',
   folderHistory: []
 };
 
@@ -242,7 +244,11 @@ function readForm() {
     youtubeFilenameTemplate:
       elements.youtubeFilenameTemplate.value.trim() || DEFAULT_SETTINGS.youtubeFilenameTemplate,
     youtubeCodec: elements.youtubeCodec.value === 'max' ? 'max' : 'h264',
-    youtubeCookies: elements.youtubeCookies.checked
+    youtubeCookies: elements.youtubeCookies.checked,
+
+    pixabayEnabled: elements.pixabayEnabled.checked,
+    pixabayFilenameTemplate:
+      elements.pixabayFilenameTemplate.value.trim() || DEFAULT_SETTINGS.pixabayFilenameTemplate
   };
 }
 
@@ -282,6 +288,9 @@ function fillForm(settings) {
     settings.youtubeFilenameTemplate || DEFAULT_SETTINGS.youtubeFilenameTemplate;
   elements.youtubeCodec.value = settings.youtubeCodec === 'max' ? 'max' : 'h264';
   elements.youtubeCookies.checked = !!settings.youtubeCookies;
+  elements.pixabayEnabled.checked = !!settings.pixabayEnabled;
+  elements.pixabayFilenameTemplate.value =
+    settings.pixabayFilenameTemplate || DEFAULT_SETTINGS.pixabayFilenameTemplate;
 
   syncUiState();
 }
@@ -616,6 +625,8 @@ async function init() {
   elements.youtubeFilenameTemplate = $('youtubeFilenameTemplate');
   elements.youtubeCodec = $('youtubeCodec');
   elements.youtubeCookies = $('youtubeCookies');
+  elements.pixabayEnabled = $('pixabayEnabled');
+  elements.pixabayFilenameTemplate = $('pixabayFilenameTemplate');
   elements.ytdlpEstado = $('ytdlpEstado');
   elements.ytdlpTexto = $('ytdlpTexto');
   elements.ytdlpAyuda = $('ytdlpAyuda');
@@ -656,7 +667,8 @@ async function init() {
     elements.imageFilenameTemplate,
     elements.instagramFilenameTemplate,
     elements.facebookFilenameTemplate,
-    elements.youtubeFilenameTemplate
+    elements.youtubeFilenameTemplate,
+    elements.pixabayFilenameTemplate
   ].forEach((input) => {
     input.addEventListener('input', save);
   });

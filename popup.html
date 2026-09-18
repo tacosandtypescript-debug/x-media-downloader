@@ -365,6 +365,34 @@
             yt-dlp. Descargar vídeos de YouTube va contra sus términos de servicio salvo que sean tuyos
             o tengas permiso.
           </p>
+          <label class="xvd-option xvd-option--check">
+            <input type="checkbox" id="pixabayEnabled" />
+            <span>
+              <strong>Pixabay</strong>
+              <small>Botones sobre las fotos, los vídeos y la música de pixabay.com.</small>
+            </span>
+          </label>
+          <label class="xvd-field" for="pixabayFilenameTemplate">
+            <span class="xvd-field__label">Plantilla del nombre en Pixabay</span>
+            <input
+              type="text"
+              id="pixabayFilenameTemplate"
+              placeholder="pixabay_{usuario}_{nombre}_{id}"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <small class="xvd-field__help">
+              Variables: <code>{usuario}</code> <code>{nombre}</code> <code>{id}</code> <code>{fecha}</code>
+              <code>{calidad}</code> <code>{ext}</code>
+            </small>
+          </label>
+          <p class="xvd-hint">
+            <strong>Pixabay sí permite descargar</strong> (su licencia de contenido deja usarlo, incluso
+            comercialmente, con sus condiciones). Se baja el <strong>MP3 original</strong> de la música (sin
+            recomprimir), los vídeos <strong>hasta 4K</strong> y las fotos hasta 1280 px: los tamaños mayores
+            los sirve la web solo con sesión iniciada o tras su captcha, y en ese caso se avisa. La extensión
+            solo usa las URLs que la propia web publica; no toca los medios «sponsored» de iStock.
+          </p>
         </div>
 
         <div class="xvd-card">

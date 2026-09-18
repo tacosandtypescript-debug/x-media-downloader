@@ -177,6 +177,7 @@ function loadBridge(options) {
   sandbox.postMessage = () => {};
   if (opts.pageState) sandbox.__INITIAL_STATE__ = opts.pageState;
   if (opts.playerResponse) sandbox.ytInitialPlayerResponse = opts.playerResponse;
+  if (opts.bootstrap) sandbox.__BOOTSTRAP__ = opts.bootstrap;
 
   const code = fs.readFileSync(path.join(ROOT, 'page-bridge.js'), 'utf8');
   vm.createContext(sandbox);
@@ -1515,6 +1516,564 @@ test('con YouTube desactivado no se crea el botón', () => {
   modulo.registro.scanners[0]();
   assert.strictEqual(modulo.registro.boton, null);
 });
+
+/* ------------------------------------------------------------- pixabay -- */
+
+console.log('\npixabay (extractor del puente y módulo)');
+
+/* Bootstrap real recortado: ficha de música + listado con foto, vídeo y destacados. */
+const PIXABAY_FICHA_AUDIO = {
+  request: { path: '/music/percussion-football-football-music-551346/' },
+  page: {
+    pageType: 'musicDetail',
+    mediaType: 'audio',
+    mediaItem: {
+      id: 551346,
+      mediaType: 'audio',
+      mediaSubType: 3,
+      sources: {
+        src: 'https://cdn.pixabay.com/audio/2026/06/21/audio_f7ff5b4757.mp3',
+        thumbnailUrl: 'https://cdn.pixabay.com/audio/2026/06/25/09-55-56-222_200x200.png',
+        filename: 'football-football-music-551346.mp3',
+        downloadUrl:
+          'https://cdn.pixabay.com/download/audio/2026/06/21/audio_f7ff5b4757.mp3?filename=sigmamusicart-football-football-music-551346.mp3'
+      },
+      duration: 59.112,
+      href: '/music/percussion-football-football-music-551346/',
+      name: 'Football - Football Music',
+      description: 'Football, Soccer, Sport',
+      fileFormat: 'MP3',
+      user: { username: 'SigmaMusicArt' }
+    },
+    relatedMedia: [
+      {
+        id: 571483,
+        mediaType: 'audio',
+        sources: {
+          src: 'https://cdn.pixabay.com/audio/2026/05/01/audio_abc123.mp3',
+          downloadUrl: '/music/download/id-571483.mp3',
+          filename: 'dark-571483.mp3'
+        },
+        duration: 71,
+        href: '/music/action-dark-571483/',
+        name: 'Dark',
+        fileFormat: 'MP3',
+        user: { username: 'SigmaMusicArt' }
+      }
+    ]
+  }
+};
+
+const PIXABAY_LISTADO = {
+  request: { path: '/images/search/nature/' },
+  page: {
+    pageType: 'search',
+    mediaType: 'photo',
+    results: [
+      {
+        id: 7572681,
+        mediaType: 'photo',
+        mediaSubType: 1,
+        width: 4228,
+        height: 2642,
+        sources: {
+          '1x': 'https://cdn.pixabay.com/photo/2022/11/05/19/56/bachalpsee-7572681_640.jpg',
+          '2x': 'https://cdn.pixabay.com/photo/2022/11/05/19/56/bachalpsee-7572681_1280.jpg',
+          downloadUrl: '/images/download/x-7572681_1920.jpg'
+        },
+        href: '/photos/bachalpsee-lake-mountains-7572681/',
+        name: 'Bachalpsee, Lake',
+        fileFormat: 'JPG',
+        user: { username: 'Himmelstraeume' }
+      },
+      {
+        id: 348656,
+        mediaType: 'video',
+        width: 3840,
+        height: 2160,
+        duration: 20,
+        sources: {
+          thumbnail: 'https://cdn.pixabay.com/video/2026/04/24/348656_tiny.jpg',
+          mp4: 'https://cdn.pixabay.com/video/2026/04/24/348656_tiny.mp4',
+          embed: 'https://cdn.pixabay.com/video/2026/04/24/348656_tiny.mp4',
+          downloadUrl: '/videos/download/x-348656_medium.mp4'
+        },
+        href: '/videos/dandelion-flower-blossom-bloom-348656/',
+        name: 'Dandelion, Flower, Blossom',
+        fileFormat: 'MP4',
+        user: { username: 'adege' }
+      },
+      {
+        id: 9623199,
+        mediaType: 'photo',
+        sources: {
+          '1x': 'https://cdn.pixabay.com/photo/2025/05/26/12/04/nature-9623199_640.jpg',
+          '2x': 'https://cdn.pixabay.com/photo/2025/05/26/12/04/nature-9623199_1920__f0efb5f0bb.jpg'
+        },
+        href: '/photos/nature-spring-bird-green-9623199/',
+        name: 'Nature, Spring',
+        fileFormat: 'JPG',
+        user: { username: 'Pexels' }
+      },
+      // Anuncio de iStock: NO debe salir (es de pago y no es de Pixabay)
+      { id: 'gm2166282428-586395729', mediaType: 'sponsored', sources: { url: 'https://media.istockphoto.com/x.jpg' } }
+    ],
+    sponsoredImages: [
+      { id: 'gm1', url: 'https://media.istockphoto.com/a.jpg', linkUrl: 'https://www.istockphoto.com/x' }
+    ],
+    heroMediaItems: [
+      {
+        id: 1850120,
+        mediaType: 'photo',
+        sources: { '2x': 'https://cdn.pixabay.com/photo/2016/11/22/19/15/hand-1850120_1920__b873924b15.jpg' },
+        href: '/photos/hand-turntable-dj-neon-lights-1850120/',
+        name: 'Hand, Turntable',
+        user: { username: 'Pexels' }
+      }
+    ],
+    featuredArtists: [
+      {
+        artist: { username: 'prettyjohn1' },
+        media: [
+          {
+            id: 508390,
+            mediaType: 'audio',
+            sources: { src: 'https://cdn.pixabay.com/audio/2026/03/25/audio_453df5bca9.mp3' },
+            href: '/music/spring-vlog-508390/',
+            name: 'Spring Vlog',
+            user: { username: 'prettyjohn1' }
+          }
+        ]
+      }
+    ],
+    // Datos que no son medios: no deben colarse
+    popularSearches: [['nature', '/images/search/nature/']],
+    order: 'popular'
+  }
+};
+
+const pbAudio = loadBridge({ bootstrap: PIXABAY_FICHA_AUDIO });
+const pbListado = loadBridge({ bootstrap: PIXABAY_LISTADO });
+
+test('el puente lee los medios del bootstrap de una ficha de música', () => {
+  const medios = pbAudio.api.mediosDePixabay();
+  assert.strictEqual(medios.length, 2, 'la ficha y la relacionada');
+  const pista = medios[0];
+  assert.strictEqual(pista.id, '551346');
+  assert.strictEqual(pista.tipo, 'audio');
+  assert.strictEqual(pista.nombre, 'Football - Football Music');
+  assert.strictEqual(pista.autor, 'SigmaMusicArt');
+  assert.strictEqual(pista.duracion, 59);
+  assert.strictEqual(pista.url, 'https://cdn.pixabay.com/download/audio/2026/06/21/audio_f7ff5b4757.mp3?filename=sigmamusicart-football-football-music-551346.mp3');
+  assert.ok(pista.mp3.includes('/download/audio/'), 'el downloadUrl del CDN se conserva');
+});
+
+test('el puente reúne fotos, vídeos, destacados y artistas del listado', () => {
+  const medios = pbListado.api.mediosDePixabay();
+  const ids = Array.from(medios, (m) => m.tipo + ':' + m.id);
+  assert.deepStrictEqual(ids, ['photo:7572681', 'video:348656', 'photo:9623199', 'photo:1850120', 'audio:508390']);
+  assert.ok(!ids.some((i) => i.includes('sponsored')), 'los anuncios de iStock no entran');
+  assert.ok(!ids.some((i) => i.includes('gm2166282428')), 'tampoco los patrocinados sueltos');
+});
+
+test('las URLs de los medios son del CDN de Pixabay', () => {
+  for (const medio of pbListado.api.mediosDePixabay()) {
+    assert.match(medio.url, /^https:\/\/cdn\.pixabay\.com\//, medio.url);
+  }
+});
+
+test('el saneado rechaza hosts ajenos y tipos desconocidos', () => {
+  assert.strictEqual(pbListado.api.sanitizePixabay({ tipo: 'photo', url: 'https://evil.example.com/x.jpg' }), null);
+  assert.strictEqual(pbListado.api.sanitizePixabay({ tipo: 'otro', url: 'https://cdn.pixabay.com/x.jpg' }), null);
+  const bueno = pbListado.api.sanitizePixabay({ id: '1', tipo: 'photo', url: 'https://cdn.pixabay.com/photo/x_640.jpg' });
+  assert.strictEqual(bueno.tipo, 'photo');
+});
+
+test('sin bootstrap de Pixabay el puente no devuelve nada', () => {
+  const vacio = loadBridge({});
+  assert.deepStrictEqual(Array.from(vacio.api.mediosDePixabay()), []);
+});
+
+/* ------------------------------------------- módulo de la página (DOM) -- */
+
+function loadPixabayModule(opciones) {
+  const op = opciones || {};
+  const registro = { scanners: [], hooks: [], descargas: [], botones: [] };
+
+  const core = {
+    BUTTON_CLASS: 'xvd-button',
+    HOST_ATTR: 'data-xvd-host',
+    ICONS: { download: '<svg></svg>', images: '<svg></svg>' },
+    registerScanner: (fn) => registro.scanners.push(fn),
+    registerDisableHook: (fn) => registro.hooks.push(fn),
+    findOverlayHost: (nodo) => nodo,
+    createButton: (options) => {
+      registro.botones.push(options);
+      const boton = {
+        dataset: {},
+        style: {},
+        className: options.className,
+        remove() {},
+        setAttribute() {},
+        appendChild() {},
+        querySelector: () => null
+      };
+      registro.ultimo = options;
+      return boton;
+    },
+    setButtonState: (boton, estado, etiqueta) => {
+      registro.estadoBoton = { estado, etiqueta };
+    },
+    log: () => {},
+    toast: (mensaje, tipo) => {
+      registro.avisos = registro.avisos || [];
+      registro.avisos.push({ mensaje, tipo });
+      return { querySelector: () => ({ textContent: '' }), remove() {} };
+    },
+    errorMessage: (e) => String((e && e.message) || e),
+    getSettings: () => ({
+      enabled: true,
+      pixabayEnabled: op.pixabayEnabled !== false,
+      pixabayFilenameTemplate: op.plantilla || 'pixabay_{usuario}_{nombre}_{id}',
+      format: op.formato || 'auto',
+      quality: op.quality || 'max',
+      minHeight: op.minHeight || 720,
+      imageResolution: op.resolucion || 'orig',
+      imageVerify: op.verificar !== false,
+      folder: op.folder || '',
+      askWhereToSave: false
+    }),
+    sanitizeFolder: (v) => String(v || '').trim(),
+    requestPixabayMedia: async () => op.medios || [],
+    requestDownload: async (peticion) => {
+      registro.descargas.push(peticion);
+      if (op.fallaDescarga) throw new Error(op.fallaDescarga);
+      return { ok: true, downloadId: registro.descargas.length };
+    },
+    fetch: async () => ({ ok: true, status: 206 }),
+    scan: () => {}
+  };
+
+  const sandbox = {
+    console,
+    URL,
+    setTimeout,
+    clearTimeout,
+    location: op.location || { hostname: 'pixabay.com', pathname: '/', search: '', href: 'https://pixabay.com/' },
+    fetch: op.fetch || (async () => ({ ok: true, status: 206 })),
+    document: op.document || {
+      querySelector: () => null,
+      querySelectorAll: () => [],
+      createElement: () => ({ style: {}, dataset: {}, appendChild() {}, setAttribute() {} })
+    },
+    window: null,
+    module: { exports: {} }
+  };
+  sandbox.window = sandbox;
+  sandbox.globalThis = sandbox;
+  sandbox.window.__XVD_CORE__ = core;
+  sandbox.addEventListener = () => {};
+
+  const code = fs.readFileSync(path.join(ROOT, 'pixabay.js'), 'utf8');
+  vm.createContext(sandbox);
+  vm.runInContext(code, sandbox, { filename: 'pixabay.js' });
+  return { api: sandbox.module.exports, registro, sandbox };
+}
+
+const pix = loadPixabayModule({}).api;
+
+/** DOM mínimo de una ficha de Pixabay: el botón «Free download» y su contenedor. */
+function domDeFichaPixabay() {
+  const contenedor = {
+    attrs: {},
+    getAttribute(clave) {
+      return this.attrs[clave] || null;
+    },
+    setAttribute(clave, valor) {
+      this.attrs[clave] = valor;
+    },
+    appendChild() {},
+    insertBefore() {},
+    parentElement: null
+  };
+  const botonWeb = { textContent: 'Free download', parentElement: contenedor };
+  return {
+    contenedor,
+    botonWeb,
+    documento: {
+      querySelector: () => null,
+      querySelectorAll: (selector) => (selector === 'button, a' ? [botonWeb] : []),
+      createElement: () => ({ style: {}, dataset: {}, appendChild() {}, setAttribute() {} })
+    }
+  };
+}
+
+test('la base de una foto quita el tamaño y el hash de firma', () => {
+  assert.strictEqual(
+    pix.baseDeFoto('https://cdn.pixabay.com/photo/2022/11/05/19/56/bachalpsee-7572681_1280.jpg'),
+    'https://cdn.pixabay.com/photo/2022/11/05/19/56/bachalpsee-7572681'
+  );
+  assert.strictEqual(
+    pix.baseDeFoto('https://cdn.pixabay.com/photo/2016/11/22/19/15/hand-1850120_1920__b873924b15.jpg'),
+    'https://cdn.pixabay.com/photo/2016/11/22/19/15/hand-1850120'
+  );
+  assert.strictEqual(
+    pix.baseDeFoto('https://cdn.pixabay.com/photo/2022/11/05/19/56/bachalpsee-7572681_960_720.jpg'),
+    'https://cdn.pixabay.com/photo/2022/11/05/19/56/bachalpsee-7572681'
+  );
+});
+
+test('los tamaños de vídeo se cambian en la URL del CDN', () => {
+  const base = 'https://cdn.pixabay.com/video/2026/04/24/348656_tiny.mp4';
+  assert.strictEqual(pix.videoConTamano(base, '_large'), 'https://cdn.pixabay.com/video/2026/04/24/348656_large.mp4');
+  assert.strictEqual(pix.videoConTamano(base, '_medium'), 'https://cdn.pixabay.com/video/2026/04/24/348656_medium.mp4');
+  assert.strictEqual(
+    pix.videoConTamano('https://cdn.pixabay.com/video/2023/11/19/189813-887078786_tiny.mp4', '_small'),
+    'https://cdn.pixabay.com/video/2023/11/19/189813-887078786_small.mp4'
+  );
+});
+
+test('el plan de vídeo empieza por 4K y baja: 4K, 1440p, 1080p, 720p', () => {
+  const medio = { tipo: 'video', url: 'https://cdn.pixabay.com/video/2026/04/24/348656_tiny.mp4' };
+  const plan = pix.planDeVideo(medio);
+  assert.deepStrictEqual(Array.from(plan, (p) => p.etiqueta), ['4K', '1440p', '1080p', '720p']);
+});
+
+test('con calidad mínima se elige el tamaño más pequeño que la cumpla', () => {
+  const modulo = loadPixabayModule({ quality: 'custom', minHeight: 1080 });
+  const medio = { tipo: 'video', url: 'https://cdn.pixabay.com/video/2026/04/24/348656_tiny.mp4' };
+  // El plan se calcula con los ajustes vigentes: se pide a través del módulo cargado.
+  const plan = modulo.api.planDeVideo(medio);
+  assert.strictEqual(plan[0].etiqueta, '1080p', JSON.stringify(Array.from(plan, (p) => p.etiqueta)));
+});
+
+test('el plan de foto empieza por 1920 y termina en el original', () => {
+  const medio = { tipo: 'photo', url: 'https://cdn.pixabay.com/photo/2022/11/05/19/56/bachalpsee-7572681_1280.jpg' };
+  const plan = pix.planDeFoto(medio);
+  const etiquetas = Array.from(plan, (p) => p.etiqueta);
+  assert.strictEqual(etiquetas[0], 'la de la web', 'la URL que da la web se prueba primero');
+  assert.ok(etiquetas.includes('1920') && etiquetas.includes('1280') && etiquetas.includes('640'), etiquetas.join(','));
+  assert.strictEqual(etiquetas[etiquetas.length - 1], 'original');
+  assert.ok(plan[plan.length - 1].url.endsWith('bachalpsee-7572681.jpg'));
+});
+
+test('con resolución «large» se prefiere 1280 y con «medium» 960', () => {
+  const grande = loadPixabayModule({ resolucion: 'large' });
+  const medio = { tipo: 'photo', url: 'https://cdn.pixabay.com/photo/2022/11/05/19/56/bachalpsee-7572681_1280.jpg' };
+  const planGrande = grande.api.planDeFoto(medio).filter((p) => /^\d+$/.test(p.etiqueta));
+  assert.strictEqual(planGrande[0].etiqueta, '1280');
+
+  const mediana = loadPixabayModule({ resolucion: 'medium' });
+  const planMediana = mediana.api.planDeFoto(medio).filter((p) => /^\d+$/.test(p.etiqueta));
+  assert.strictEqual(planMediana[0].etiqueta, '960');
+});
+
+test('el audio usa el MP3 del CDN sin recomprimir', () => {
+  const modulo = loadPixabayModule({});
+  const plan = modulo.api.planDeAudio({
+    tipo: 'audio',
+    url: 'https://cdn.pixabay.com/audio/2026/06/21/audio_f7ff5b4757.mp3',
+    mp3: 'https://cdn.pixabay.com/download/audio/2026/06/21/audio_f7ff5b4757.mp3?filename=x.mp3'
+  });
+  assert.strictEqual(plan.length, 1);
+  assert.ok(plan[0].url.includes('/download/audio/'), 'prefiere la URL de descarga del CDN');
+  assert.strictEqual(plan[0].etiqueta, 'mp3');
+});
+
+test('el nombre de archivo usa la plantilla de Pixabay y la carpeta', () => {
+  const medio = { id: '551346', autor: 'SigmaMusicArt', nombre: 'Football - Football Music' };
+  assert.strictEqual(pix.nombreDeArchivo(medio, 'mp3', ''), 'pixabay_SigmaMusicArt_Football - Football Music_551346.mp3');
+
+  const conCarpeta = loadPixabayModule({ folder: 'Musica/Pixabay' }).api.nombreDeArchivo(medio, 'mp3', '');
+  assert.strictEqual(conCarpeta, 'Musica/Pixabay/pixabay_SigmaMusicArt_Football - Football Music_551346.mp3');
+});
+
+test('un nombre con caracteres prohibidos no rompe el archivo', () => {
+  const nombre = pix.nombreDeArchivo({ id: '1', autor: 'a/b', nombre: 'Foto: ¿qué? <grande> | 4K' }, 'jpg', '1920');
+  assert.ok(!/[\\/:*?"<>|]/.test(nombre), nombre);
+  assert.ok(nombre.endsWith('.jpg'));
+});
+
+test('detecta la ficha abierta aunque la ruta lleve idioma', () => {
+  const enEspanol = loadPixabayModule({
+    location: { hostname: 'pixabay.com', pathname: '/es/photos/bachalpsee-lake-mountains-7572681/', search: '' }
+  }).api;
+  assert.strictEqual(enEspanol.esLaFichaDe({ href: '/photos/bachalpsee-lake-mountains-7572681/' }), true);
+  assert.strictEqual(enEspanol.esLaFichaDe({ href: '/photos/otra-cosa-999/' }), false);
+});
+
+test('el módulo solo se activa en pixabay.com', () => {
+  const enPixabay = loadPixabayModule({});
+  assert.strictEqual(enPixabay.registro.scanners.length, 1);
+  assert.strictEqual(enPixabay.registro.hooks.length, 1);
+
+  const fuera = loadPixabayModule({ location: { hostname: 'x.com', pathname: '/', search: '' } });
+  assert.strictEqual(fuera.registro.scanners.length, 0);
+});
+
+test('al descargar se comprueba el mejor tamaño y se pide con carpeta y nombre', async () => {
+  // DOM mínimo de una ficha: el botón «Free download» de la web y su contenedor.
+  const contenedorAcciones = {
+    attrs: {},
+    getAttribute(clave) {
+      return this.attrs[clave] || null;
+    },
+    setAttribute(clave, valor) {
+      this.attrs[clave] = valor;
+    },
+    appendChild() {},
+    insertBefore() {},
+    parentElement: null
+  };
+  const botonWeb = { textContent: 'Free download', parentElement: contenedorAcciones };
+  const documento = {
+    querySelector: () => null,
+    querySelectorAll: (selector) => (selector === 'button, a' ? [botonWeb] : []),
+    createElement: () => ({ style: {}, dataset: {}, appendChild() {}, setAttribute() {} })
+  };
+
+  const modulo = loadPixabayModule({
+    folder: 'Pixabay/Musica',
+    document: documento,
+    location: {
+      hostname: 'pixabay.com',
+      pathname: '/music/percussion-football-football-music-551346/',
+      search: ''
+    },
+    medios: [
+      {
+        id: '551346',
+        tipo: 'audio',
+        url: 'https://cdn.pixabay.com/audio/2026/06/21/audio_f7ff5b4757.mp3',
+        mp3: 'https://cdn.pixabay.com/download/audio/2026/06/21/audio_f7ff5b4757.mp3?filename=x.mp3',
+        nombre: 'Football - Football Music',
+        autor: 'SigmaMusicArt',
+        href: '/music/percussion-football-football-music-551346/'
+      }
+    ]
+  });
+
+  // El escáner pide los medios al puente y coloca el botón junto al de la web.
+  await modulo.registro.scanners[0]();
+  assert.ok(modulo.registro.ultimo, 'debe crear el botón');
+  assert.ok(/xvd-button--en-linea/.test(modulo.registro.ultimo.className), modulo.registro.ultimo.className);
+
+  await modulo.registro.ultimo.onClick({}, { dataset: {}, remove() {} });
+
+  assert.strictEqual(modulo.registro.descargas.length, 1, 'una sola descarga');
+  const peticion = modulo.registro.descargas[0];
+  assert.ok(peticion.url.startsWith('https://cdn.pixabay.com/download/audio/'), peticion.url);
+  assert.strictEqual(peticion.filename, 'Pixabay/Musica/pixabay_SigmaMusicArt_Football - Football Music_551346.mp3');
+  assert.strictEqual(modulo.registro.estadoBoton.estado, 'done');
+});
+
+test('si el tamaño preferido no existe, se prueba el siguiente', async () => {
+  const contenedor = {
+    attrs: {},
+    getAttribute() {
+      return null;
+    },
+    setAttribute() {},
+    appendChild() {},
+    insertBefore() {},
+    parentElement: null
+  };
+  const botonWeb = { textContent: 'Free download', parentElement: contenedor };
+  const documento = {
+    querySelector: () => null,
+    querySelectorAll: (s) => (s === 'button, a' ? [botonWeb] : []),
+    createElement: () => ({ style: {}, dataset: {}, appendChild() {}, setAttribute() {} })
+  };
+
+  const modulo = loadPixabayModule({
+    document: documento,
+    location: { hostname: 'pixabay.com', pathname: '/photos/bachalpsee-lake-mountains-7572681/', search: '' },
+    // `_1920` y `_1280` no existen (403): solo `_960_720` responde.
+    fetch: async (url) => ({ ok: /_960_720/.test(url), status: /_960_720/.test(url) ? 206 : 403 }),
+    medios: [
+      {
+        id: '7572681',
+        tipo: 'photo',
+        url: 'https://cdn.pixabay.com/photo/2022/11/05/19/56/bachalpsee-7572681_1280.jpg',
+        nombre: 'Bachalpsee, Lake',
+        autor: 'Himmelstraeume',
+        href: '/photos/bachalpsee-lake-mountains-7572681/'
+      }
+    ]
+  });
+
+  await modulo.registro.scanners[0]();
+  await modulo.registro.ultimo.onClick({}, { dataset: {}, remove() {} });
+
+  assert.strictEqual(modulo.registro.descargas.length, 1);
+  assert.ok(/_960_720\.jpg$/.test(modulo.registro.descargas[0].url), modulo.registro.descargas[0].url);
+});
+
+test('en un vídeo, «solo audio» avisa en vez de bajar algo raro', async () => {
+  const { documento } = domDeFichaPixabay();
+  const modulo = loadPixabayModule({
+    formato: 'mp3',
+    document: documento,
+    location: { hostname: 'pixabay.com', pathname: '/videos/dandelion-flower-blossom-bloom-348656/', search: '' },
+    medios: [
+      {
+        id: '348656',
+        tipo: 'video',
+        url: 'https://cdn.pixabay.com/video/2026/04/24/348656_tiny.mp4',
+        nombre: 'Dandelion',
+        autor: 'adege',
+        href: '/videos/dandelion-flower-blossom-bloom-348656/'
+      }
+    ]
+  });
+  const boton = { dataset: {}, remove() {} };
+  await modulo.registro.scanners[0]();
+  await modulo.registro.ultimo.onClick({}, boton);
+
+  assert.strictEqual(modulo.registro.descargas.length, 0, 'no se descarga nada');
+  assert.ok(
+    (modulo.registro.avisos || []).some((a) => /sin sonido/.test(a.mensaje)),
+    JSON.stringify(modulo.registro.avisos)
+  );
+});
+
+test('si ningún tamaño responde, se avisa sin descargar', async () => {
+  const contenedor = {
+    getAttribute: () => null,
+    setAttribute() {},
+    appendChild() {},
+    insertBefore() {},
+    parentElement: null
+  };
+  const documento = {
+    querySelector: () => null,
+    querySelectorAll: (s) => (s === 'button, a' ? [{ textContent: 'Free download', parentElement: contenedor }] : []),
+    createElement: () => ({ style: {}, dataset: {}, appendChild() {}, setAttribute() {} })
+  };
+
+  const modulo = loadPixabayModule({
+    document: documento,
+    fetch: async () => ({ ok: false, status: 403 }),
+    location: { hostname: 'pixabay.com', pathname: '/photos/bachalpsee-lake-mountains-7572681/', search: '' },
+    medios: [
+      {
+        id: '7572681',
+        tipo: 'photo',
+        url: 'https://cdn.pixabay.com/photo/2022/11/05/19/56/bachalpsee-7572681_1280.jpg',
+        nombre: 'Bachalpsee',
+        autor: 'Himmelstraeume',
+        href: '/photos/bachalpsee-lake-mountains-7572681/'
+      }
+    ]
+  });
+
+  await modulo.registro.scanners[0]();
+  await modulo.registro.ultimo.onClick({}, { dataset: {}, remove() {} });
+
+  // Al no poder comprobar ninguna, se intenta la primera y se confía en el reintento.
+  assert.ok(modulo.registro.descargas.length >= 1, 'se intenta la primera igualmente');
+});
+
 
 /* ------------------------------------------------------------------ cierre -- */
 

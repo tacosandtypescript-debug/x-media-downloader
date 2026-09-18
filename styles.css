@@ -153,6 +153,22 @@
   right: auto;
 }
 
+/* ---- Pixabay ---- */
+
+/* En las miniaturas (fotos y vídeos) el botón va arriba a la derecha. */
+.xvd-button--pixabay {
+  top: 8px;
+  right: 8px;
+}
+
+/* En las filas de música y junto al botón «Free download» el botón va en línea,
+   sin posición absoluta, para no tapar nada. */
+.xvd-button--en-linea {
+  position: static;
+  margin: 0 6px;
+  vertical-align: middle;
+}
+
 /* ---- Contador de galería (1/4, 2/4…) ---- */
 
 .xvd-badge {
