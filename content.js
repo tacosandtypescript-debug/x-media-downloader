@@ -38,6 +38,9 @@
   const IMAGE_ATTR = 'data-xvd-image';
   const TOASTS_ID = 'xvd-toasts';
 
+  /** Versión del núcleo (se muestra en el diagnóstico del popup). */
+  const coreVersion = '2.1.0';
+
   const DEFAULT_SETTINGS = {
     /* --- General --- */
     enabled: true,                 // interruptor general on/off
@@ -155,6 +158,142 @@
   }
 
   /* =======================================================================
+   * 2a. Registro de diagnóstico
+   *
+   * Cada paso relevante se anota aquí, se imprime en la consola de la página
+   * con el prefijo [XVD] y se envía al service worker, que lo conserva en
+   * chrome.storage.session. El popup lo muestra en la pestaña «General», de
+   * modo que se puede saber POR QUÉ no se descarga algo sin abrir DevTools.
+   * ===================================================================== */
+
+  /** Convierte cualquier detalle en una cadena corta y segura. */
+  function safeDetail(detail) {
+    if (detail === undefined || detail === null) return '';
+    if (typeof detail === 'string') return detail.slice(0, 600);
+    if (typeof detail === 'number' || typeof detail === 'boolean') return String(detail);
+    try {
+      const json = JSON.stringify(detail);
+      if (!json) return '';
+      return json.length > 900 ? json.slice(0, 900) + '…' : json;
+    } catch (_) {
+      return String(detail).slice(0, 300);
+    }
+  }
+
+  /**
+   * Anota una entrada de diagnóstico.
+   * @param {'info'|'warn'|'error'} level
+   * @param {string} area  video | imagen | resolucion | descarga | ajustes | inicio
+   * @param {string} message
+   * @param {*} [detail]
+   */
+  function log(level, area, message, detail) {
+    const entry = {
+      t: Date.now(),
+      level: level === 'error' ? 'error' : level === 'warn' ? 'warn' : 'info',
+      area: String(area || 'general').slice(0, 24),
+      msg: String(message || '').slice(0, 400),
+      detail: safeDetail(detail)
+    };
+    try {
+      if (entry.level === 'error') console.error('[XVD]', entry.area + ':', entry.msg, entry.detail || '');
+      else if (entry.level === 'warn') console.warn('[XVD]', entry.area + ':', entry.msg, entry.detail || '');
+      else console.log('[XVD]', entry.area + ':', entry.msg, entry.detail || '');
+    } catch (_) {
+      /* consola no disponible */
+    }
+    try {
+      chrome.runtime.sendMessage({ type: 'XVD_LOG', entry }, () => {
+        void chrome.runtime.lastError;
+      });
+    } catch (_) {
+      /* el service worker no está disponible ahora mismo */
+    }
+    return entry;
+  }
+
+  /* =======================================================================
+   * 2b. Puente con el MUNDO DE LA PÁGINA (page-bridge.js)
+   *
+   * Un content script vive en un "mundo aislado": comparte el DOM, pero NO los
+   * globales de JavaScript ni las propiedades añadidas a los nodos. Por eso no
+   * puede leer ni `window.__INITIAL_STATE__` ni `nodo.__reactFiber$…`, que es
+   * justo donde X guarda el manifiesto del video. page-bridge.js se inyecta en
+   * el mundo MAIN y responde por window.postMessage.
+   * ===================================================================== */
+
+  const BRIDGE_MARK = '__xvdBridge';
+  const BRIDGE_TIMEOUT = 3500;
+
+  /** requestId -> función que resuelve la petición en curso */
+  const bridgeRequests = new Map();
+
+  /** Diagnóstico: ¿ha respondido el puente alguna vez en esta pestaña? */
+  let bridgeResponded = false;
+  let bridgeTimeouts = 0;
+
+  window.addEventListener(
+    'message',
+    (event) => {
+      if (event.source !== window) return;
+      const data = event.data;
+      if (!data || typeof data !== 'object' || data[BRIDGE_MARK] !== true) return;
+      if (data.kind !== 'response') return;
+
+      bridgeResponded = true;
+      const resolver = bridgeRequests.get(data.requestId);
+      if (!resolver) return;
+      bridgeRequests.delete(data.requestId);
+      resolver(Array.isArray(data.media) ? data.media : []);
+    },
+    false
+  );
+
+  /**
+   * Pide al puente las entidades multimedia del reproductor indicado.
+   * Nunca lanza: si el puente no está presente o no responde, devuelve [].
+   */
+  function requestMediaFromBridge(mediaId, poster, timeoutMs) {
+    return new Promise((resolve) => {
+      const requestId = 'xvd-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+      const limite = timeoutMs || BRIDGE_TIMEOUT;
+      let settled = false;
+
+      const finish = (media) => {
+        if (settled) return;
+        settled = true;
+        bridgeRequests.delete(requestId);
+        resolve(media);
+      };
+
+      const timer = setTimeout(() => {
+        if (settled) return;
+        bridgeTimeouts++;
+        log('warn', 'resolucion', 'El puente del mundo de la página no respondió a tiempo', {
+          ms: limite,
+          veces: bridgeTimeouts
+        });
+        finish([]);
+      }, limite);
+
+      bridgeRequests.set(requestId, (media) => {
+        clearTimeout(timer);
+        finish(media);
+      });
+
+      try {
+        window.postMessage(
+          { [BRIDGE_MARK]: true, kind: 'request', requestId, mediaId: mediaId || '', poster: poster || '' },
+          '*'
+        );
+      } catch (_) {
+        clearTimeout(timer);
+        finish([]);
+      }
+    });
+  }
+
+  /* =======================================================================
    * 3. Ajustes (chrome.storage.sync con respaldo local)
    * ===================================================================== */
 
@@ -191,6 +330,13 @@
   });
 
   function applySettings() {
+    log('info', 'ajustes', 'Ajustes actualizados', {
+      activo: !!settings.enabled,
+      imagenes: !!settings.imagesEnabled,
+      video: settings.format + '/' + settings.quality,
+      imagen: settings.imageResolution + '/' + settings.imageFormat
+    });
+
     for (const hook of disableHooks) {
       try {
         hook(settings);
@@ -728,36 +874,79 @@
    */
   async function resolveMedia(video) {
     const mediaId = mediaIdFromVideo(video);
+    const poster = video.getAttribute('poster') || '';
+    const tInicio = Date.now();
     /** @type {Array<Array<any>>} */
     const tiers = [];
 
-    // Nivel 0: props de React del propio tweet (lo más cercano y fiable).
+    log('info', 'resolucion', 'Buscando el manifiesto del video', {
+      idPoster: mediaId || '(el póster aún no está)',
+      puenteActivo: bridgeResponded,
+      url: location.pathname
+    });
+
+    // Nivel 0 (el fiable): el puente del mundo de la página. Se lanza ya y se
+    // recoge al final, de modo que mientras recorre las fibras de React se
+    // ejecutan en paralelo las estrategias locales.
+    const bridgePromise = requestMediaFromBridge(mediaId, poster, BRIDGE_TIMEOUT);
+
+    // Nivel 1: props de React desde este mismo contexto. En un content script
+    // normal no ve nada (mundos aislados); se mantiene como red de seguridad.
     const fromReact = dedupeMedia(mediaFromReact(video));
     if (fromReact.length) tiers.push(fromReact);
 
-    const alreadyMatched = mediaId ? !!matchCandidate(fromReact, mediaId) : false;
+    const matched = () => {
+      const flat = tiers.reduce((acc, tier) => acc.concat(tier), []);
+      if (mediaId) return !!matchCandidate(flat, mediaId);
+      return tiers.some((tier) => tier.length === 1);
+    };
 
-    if (!alreadyMatched) {
-      // Nivel 1: estado global de la página (window.__INITIAL_STATE__ y similares).
+    if (!matched()) {
+      // Nivel 2: estado global de la página (window.__INITIAL_STATE__ y similares).
       const fromState = dedupeMedia(mediaFromPageState());
       if (fromState.length) tiers.push(fromState);
+    }
 
-      // Nivel 2: árbol completo de React (búsqueda profunda, acotada).
+    if (!matched()) {
+      // Nivel 3: árbol completo de React mediante el hook de DevTools.
       const fromRoots = dedupeMedia(mediaFromReactRoots(mediaId));
       if (fromRoots.length) tiers.push(fromRoots);
+    }
 
-      // Nivel 3: manifiestos HLS vistos en la red (resolución real por calidad).
+    if (!matched()) {
+      // Nivel 4: manifiestos HLS vistos en la red (funciona en el mundo aislado).
+      const tHls = Date.now();
       const fromPlaylists = await mediaFromPlaylists(mediaId);
       if (fromPlaylists.length) tiers.push(fromPlaylists);
-
-      // Nivel 4: src directo del propio reproductor.
-      const fromDom = dedupeMedia(mediaFromDomSources(video));
-      if (fromDom.length) tiers.push(fromDom);
+      log('info', 'resolucion', 'Estrategia de red (manifiestos HLS)', {
+        medios: fromPlaylists.length,
+        ms: Date.now() - tHls
+      });
     }
+
+    // Nivel 5: src directo del propio reproductor.
+    const fromDom = dedupeMedia(mediaFromDomSources(video));
+    if (fromDom.length) tiers.push(fromDom);
+
+    // El puente pasa a ser el nivel preferente en cuanto responde.
+    const bridgeEntities = await bridgePromise;
+    const fromBridge = dedupeMedia(bridgeEntities.map(normalizeMediaEntity).filter(Boolean));
+    if (fromBridge.length) tiers.unshift(fromBridge);
+    log(fromBridge.length ? 'info' : 'warn', 'resolucion', 'Respuesta del puente del mundo de la página', {
+      medios: fromBridge.length,
+      ids: fromBridge.map((m) => m.id).filter(Boolean).slice(0, 4),
+      variantes: fromBridge.reduce((n, m) => n + m.variants.length, 0),
+      ms: Date.now() - tInicio
+    });
 
     const all = dedupeMedia(tiers.reduce((acc, tier) => acc.concat(tier), []));
 
     if (!all.length) {
+      log('error', 'resolucion', 'Ninguna estrategia encontró el manifiesto del video', {
+        idBuscado: mediaId || '(sin póster)',
+        niveles: tiers.map((t) => t.length),
+        url: location.pathname
+      });
       throw new Error(
         'No se pudo obtener el video en la calidad solicitada. Desplázate un poco, dale a reproducir y vuelve a intentarlo.'
       );
@@ -778,6 +967,10 @@
     if (!chosen && all.length === 1) chosen = all[0];
 
     if (!chosen) {
+      log('error', 'resolucion', 'No se pudo identificar el video entre los candidatos', {
+        idBuscado: mediaId || '(sin póster)',
+        idsEncontrados: all.map((m) => m.id).filter(Boolean).slice(0, 6)
+      });
       throw new Error(
         'No se pudo identificar este video entre los encontrados en la página. Reproduce el video un instante y reinténtalo.'
       );
@@ -1219,7 +1412,10 @@
   }
 
   /** Escaneo del módulo de video: se registra en el núcleo compartido. */
+  let lastLoggedVideoCount = -1;
+
   function scanVideos() {
+    const videos = Array.from(document.querySelectorAll('video'));
     document.querySelectorAll('video').forEach((video) => {
       try {
         ensureButton(video);
@@ -1227,6 +1423,18 @@
         /* nunca romper la página por un video problemático */
       }
     });
+
+    const conBoton = videos.filter((v) => v.__xvdButton && v.__xvdButton.isConnected).length;
+    if (conBoton !== lastLoggedVideoCount) {
+      lastLoggedVideoCount = conBoton;
+      const descartados = videos.filter((v) => !(v.__xvdButton && v.__xvdButton.isConnected)).length;
+      log(descartados ? 'warn' : 'info', 'video', 'Barrido del DOM', {
+        reproductores: videos.length,
+        conBoton,
+        sinBoton: descartados,
+        motivo: descartados ? 'sin tamaño aún (se reintenta al redimensionar)' : ''
+      });
+    }
   }
   registerScanner(scanVideos);
 
@@ -1310,28 +1518,59 @@
       } catch (err) {
         lastError = err;
       }
-      if (i < attempts - 1) await sleep(400 * (i + 1));
+      if (i < attempts - 1) {
+        log('info', 'resolucion', 'Reintento ' + (i + 2) + ' de ' + attempts + '…', { esperaMs: 400 * (i + 1) });
+        await sleep(400 * (i + 1));
+      }
     }
     throw lastError || new Error('No se pudo obtener el video en la calidad solicitada.');
   }
 
   async function handleDownloadClick(event, video, button) {
+    const tInicio = Date.now();
     setButtonState(button, 'loading', 'Preparando…');
+    log('info', 'video', 'Clic en «Descargar»', {
+      idPoster: mediaIdFromVideo(video) || '(sin póster)',
+      puenteActivo: bridgeResponded,
+      ajustes: settings.format + '/' + settings.quality
+    });
+
     try {
       const media = await resolveMediaWithRetry(video);
       const plan = planDownload(media);
-      if (plan.error) throw new Error(plan.error);
+
+      if (plan.error) {
+        log('error', 'resolucion', 'No hay ninguna variante descargable', { motivo: plan.error });
+        throw new Error(plan.error);
+      }
 
       const context = getTweetContext(video);
 
       if (plan.hls) {
+        log('warn', 'video', 'Solo hay stream HLS: se intenta reconstruir', {
+          resolucion: plan.hls.height + 'p',
+          url: plan.hls.url
+        });
         await downloadHlsStream(plan.hls, media, context);
         return;
       }
 
+      const elegida = plan.ordered[0];
+      log('info', 'video', 'Variante elegida', {
+        resolucion: (elegida.height || '?') + 'p',
+        bitrate: elegida.bitrate,
+        tipo: elegida.ext,
+        variantes: plan.ordered.length,
+        ms: Date.now() - tInicio
+      });
+
       if (plan.notice) toast(plan.notice, 'warn', 6000);
       await startDownload(plan.ordered, media, context, button);
     } catch (err) {
+      log('error', 'video', 'Fallo al preparar la descarga', {
+        mensaje: errorMessage(err),
+        stack: err && err.stack ? String(err.stack).split('\n').slice(0, 3).join(' | ') : ''
+      });
       setButtonState(button, 'error', 'No disponible');
       toast(errorMessage(err), 'error', 7000);
     } finally {
@@ -1351,8 +1590,17 @@
       saveAs: options.saveAs === undefined ? !!settings.askWhereToSave : !!options.saveAs
     });
     if (!response || !response.ok) {
+      log('error', 'descarga', 'El service worker rechazó la descarga', {
+        archivo: options.filename,
+        url: options.url,
+        motivo: response && response.error ? response.error : 'sin respuesta'
+      });
       throw new Error(response && response.error ? response.error : 'No se pudo iniciar la descarga.');
     }
+    log('info', 'descarga', 'Descarga aceptada por chrome.downloads', {
+      id: response.downloadId,
+      archivo: response.filename || options.filename
+    });
     pendingDownloads.set(response.downloadId, {
       filename: options.filename,
       label: options.label || 'archivo',
@@ -1395,6 +1643,10 @@
     if (!settings.autoFallback || next >= ordered.length) return null;
 
     toast('La descarga falló (' + reason + '). Reintentando con menor calidad…', 'warn', 5000);
+    log('warn', 'descarga', 'Reintentando con una variante inferior', {
+      resolucion: (ordered[next].height || '?') + 'p',
+      motivo: reason
+    });
     const variant = ordered[next];
     const filename = buildFilename(media, variant, context);
     try {
@@ -1544,7 +1796,11 @@
         ok: true,
         videos: document.querySelectorAll('video').length,
         images: document.querySelectorAll('[' + IMAGE_ATTR + ']').length,
-        enabled: !!settings.enabled
+        enabled: !!settings.enabled,
+        imagesEnabled: !!settings.imagesEnabled,
+        bridge: bridgeResponded,
+        bridgeTimeouts,
+        version: coreVersion
       });
       return true;
     }
@@ -1557,6 +1813,10 @@
 
     if (event.state === 'complete') {
       pendingDownloads.delete(event.downloadId);
+      log('info', 'descarga', 'Descarga completada', {
+        id: event.downloadId,
+        archivo: record ? record.filename : '(desconocido)'
+      });
       toast('Descarga completada: ' + (record ? record.filename : 'archivo guardado'), 'success', 4000);
       return;
     }
@@ -1565,6 +1825,12 @@
 
     pendingDownloads.delete(event.downloadId);
     const reason = event.message || 'Error desconocido durante la descarga.';
+    log('error', 'descarga', 'Chrome interrumpió la descarga', {
+      id: event.downloadId,
+      codigo: event.errorCode || '',
+      motivo: reason,
+      archivo: record ? record.filename : '(desconocido)'
+    });
 
     // Cada módulo decide cómo reaccionar: el de video baja de calidad y el de
     // imágenes prueba la siguiente resolución disponible.
@@ -1604,6 +1870,7 @@
     toast,
     sleep,
     errorMessage,
+    log,
     registerScanner,
     registerDisableHook,
     requestDownload,
@@ -1622,6 +1889,16 @@
     document.documentElement.classList.toggle('xvd-hover-only', !!settings.showOnHover);
     startObserver();
     scheduleScan();
+
+    log('info', 'inicio', 'Content script listo', {
+      version: coreVersion,
+      activo: !!settings.enabled,
+      imagenes: !!settings.imagesEnabled,
+      video: settings.format + '/' + settings.quality,
+      imagen: settings.imageResolution + '/' + settings.imageFormat,
+      carpeta: sanitizeFolder(settings.folder) || '(raíz de Descargas)',
+      url: location.pathname
+    });
 
     // Segundo barrido tras la hidratación inicial de la SPA.
     setTimeout(scheduleScan, 1200);

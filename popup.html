@@ -293,6 +293,21 @@
           <h2>Estado</h2>
           <p class="xvd-hint" id="generalStatus">—</p>
         </div>
+
+        <div class="xvd-card">
+          <h2>Registro de diagnóstico</h2>
+          <p class="xvd-hint" id="diagSummary">—</p>
+          <pre class="xvd-log" id="diagLog">Sin registros todavía. Abre un vídeo o una imagen en X y pulsa «Descargar».</pre>
+          <div class="xvd-diag__actions">
+            <button type="button" id="diagRefresh" class="xvd-btn xvd-btn--ghost">Actualizar</button>
+            <button type="button" id="diagClear" class="xvd-btn xvd-btn--ghost">Borrar</button>
+            <button type="button" id="diagCopy" class="xvd-btn">Copiar informe</button>
+          </div>
+          <p class="xvd-hint">
+            Se guarda solo en esta sesión del navegador (en memoria); nunca se envía a ningún servidor.
+            Si una descarga falla, pulsa «Copiar informe» y pégalo donde te lo pidan.
+          </p>
+        </div>
       </section>
     </main>
 

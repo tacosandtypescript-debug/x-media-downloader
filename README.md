@@ -94,6 +94,18 @@ Al ser la versión **2.0.0** se añade `images.js` y el permiso de host de `pbs.
 sustituir los archivos, pulsa **↻ (Actualizar)** en `chrome://extensions/` y **recarga** las
 pestañas de X para que se inyecte el nuevo módulo.
 
+### Actualizar a la versión 2.1.0 (importante: arregla la descarga de video)
+
+La 2.1.0 incorpora `page-bridge.js`, el puente en el mundo MAIN que arregla la extracción del
+manifiesto del video, y añade el **registro de diagnóstico**. Si notabas que el botón aparecía pero
+la descarga no arrancaba, esta es tu actualización.
+
+1. Sustituye los archivos (o `git pull` si clonaste el repositorio).
+2. En `chrome://extensions/`, pulsa **↻ (Actualizar)** y comprueba que la versión muestra **2.1.0**.
+3. **Recarga todas las pestañas de X**: el puente se inyecta al cargar la página, así que una pestaña
+   abierta antes de actualizar no lo tendrá.
+4. Abre el popup → pestaña **General** → el resumen del diagnóstico debe indicar **`puente activo ✓`**.
+
 ---
 
 ## Uso
@@ -183,8 +195,11 @@ x-video-downloader/
 │   └── icon128.png      Icono de instalación / Chrome Web Store
 ├── tools/
 │   ├── make-icons.js    Generador de iconos sin dependencias (opcional)
-│   ├── test.js          Pruebas de la lógica pura (43 comprobaciones)
-│   └── check-popup.js   Comprobación de coherencia popup.html ↔ popup.js
+│   ├── test.js          Pruebas de la lógica pura (50 comprobaciones)
+│   ├── check-popup.js   Comprobación de coherencia popup.html ↔ popup.js
+│   ├── e2e-test.py      Prueba end-to-end en un Chromium real (23 comprobaciones)
+│   └── fixtures/
+│       └── tweet-video-2100475914182107353.json   Tweet real usado como fixture
 └── README.md            Este documento
 ```
 
@@ -206,9 +221,10 @@ publica una API interna en `window.__XVD_CORE__`, dentro del mundo aislado de la
 | `createButton(opts)` / `setButtonState(...)` | Fábrica de botones superpuestos y estados (reposo, spinner, check, error). |
 | `findOverlayHost(el)` / `getTweetContext(el)` | Anclaje del botón y contexto del tweet (usuario, id, fecha). |
 | `requestDownload(opts)` | Envía `XVD_DOWNLOAD` al service worker y registra el respaldo `onInterrupted`. |
+| `log(level, area, msg, detail)` | Registro de diagnóstico compartido (ver más abajo). |
 | `toast(...)` / `sendMessage(...)` / `sleep(...)` | Avisos en español y mensajería interna. |
 
-Así, video e imágenes no comparten lógica de negocio pero sí toda la infraestructura.
+`page-bridge.js` va aparte porque **debe ejecutarse en el mundo de la página**, no en el aislado.
 
 ### Flujo de mensajería
 
@@ -218,8 +234,10 @@ Así, video e imágenes no comparten lógica de negocio pero sí toda la infraes
  [images.js]   ◀──── XVD_DOWNLOAD_EVENT ─────┘
                 (complete / interrupted → respaldo: menor calidad o resolución alternativa)
 
+ [content.js] ── window.postMessage ──▶ [page-bridge.js]  (mundo MAIN: fibras de React)
  [popup.js] ── chrome.storage.sync ──▶ content.js + images.js (chrome.storage.onChanged)
-            └─ XVD_PING ─────────────▶ { videos, images }  (contadores de la pestaña)
+            ├─ XVD_PING ─────────────▶ { videos, images, bridge }  (estado de la pestaña)
+            └─ chrome.storage.session ◀── XVD_LOG  (registro de diagnóstico)
 ```
 
 - **content.js / images.js** nunca descargan directamente: resuelven la URL y delegan.
@@ -230,27 +248,99 @@ Así, video e imágenes no comparten lógica de negocio pero sí toda la infraes
 
 ## Cómo obtiene la URL del video
 
-Los videos de X se reproducen por *streaming* (MSE), por lo que el atributo `src` del `<video>` es
-un `blob:` inutilizable. La extensión aplica una **cascada de estrategias** hasta encontrar el
-manifiesto de variantes:
+Los videos de X se reproducen por *streaming* (MSE), así que el `src` del `<video>` es un `blob:`
+inutilizable. El manifiesto con las calidades reales vive en las **props de React** de la página o
+en su **estado global**, y ahí está el detalle importante:
 
-1. **Props de React (fibras).** Recorrido acotado de `__reactProps$…` / `__reactFiber$…` del propio
-   `<video>`, de sus contenedores y del `<article>` del tweet buscando `video_info.variants`.
+> **Un content script no puede leer eso.** Chrome ejecuta los content scripts en un *mundo aislado*:
+> comparten el DOM, pero **no** los globales de JavaScript ni las propiedades añadidas a los nodos.
+> Comprobado en un navegador real:
+>
+> | | Mundo aislado (content script) | Mundo MAIN (página) |
+> | --- | --- | --- |
+> | Atributo DOM (`poster`) | ✅ | ✅ |
+> | `nodo.__reactFiber$…` | ❌ | ✅ |
+> | `window.__INITIAL_STATE__` | ❌ | ✅ |
+> | `window.__REACT_DEVTOOLS_GLOBAL_HOOK__` | ❌ | ✅ |
+
+Por eso la extensión incluye **`page-bridge.js`**, declarado en el manifiesto con `"world": "MAIN"`
+(lo inyecta Chrome, así que la CSP de x.com no lo bloquea). El content script le pide el manifiesto
+por `window.postMessage` y el puente responde con las entidades multimedia.
+
+```
+content.js (mundo aislado)                    page-bridge.js (mundo MAIN)
+   │  {kind:'request', mediaId, poster}          │
+   ├──────────── window.postMessage ────────────▶│
+   │                                             │  recorre fibras de React,
+   │                                             │  props y estado global
+   │  {kind:'response', media:[…]}               │
+   ◀─────────────────────────────────────────────┤
+```
+
+**Cascada de estrategias** (el puente cubre las tres primeras):
+
+1. **Props de React (fibras).** `__reactProps$…` / `__reactFiber$…` del propio `<video>`, de sus
+   contenedores y del `<article>` del tweet. Es la vía fiable y la primera que se intenta.
 2. **Estado global.** `window.__INITIAL_STATE__`, `__NEXT_DATA__`, `__APOLLO_STATE__`,
    `__PRELOADED_STATE__` (compatibilidad con estructuras heredadas de Twitter).
 3. **Árbol global de React** vía `__REACT_DEVTOOLS_GLOBAL_HOOK__`, con tope de nodos.
-4. **Peticiones de red.** Entradas de `performance.getEntriesByType('resource')` filtradas por el
-   id del video (obtenido del `poster`), descarga y análisis del `.m3u8` (`BANDWIDTH`, `RESOLUTION`,
-   `CODECS`).
+4. **Peticiones de red.** Entradas de `performance.getEntriesByType('resource')`, que sí funcionan
+   en el mundo aislado: se filtran por el id del video, se descarga el `.m3u8` y se leen
+   `BANDWIDTH`, `RESOLUTION` y `CODECS`.
 5. **`<video>` / `<source>`.** Último recurso: `currentSrc`, `src` y los `<source>` hijos.
 
 **Identificación del video correcto.** El id se extrae del póster
-(`pbs.twimg.com/amplify_video_thumb/<id>/…`) y se cruza con los candidatos; la resolución se repite
-en el momento del clic, nunca al pintar el botón.
+(`pbs.twimg.com/amplify_video_thumb/<id>/…`) y se cruza con los candidatos; el puente busca
+justamente el `<video>` cuyo `poster` coincide. Así, en un tweet con cita (dos videos) o en un
+timeline con varios, nunca se descarga el equivocado. La resolución se repite en el momento del
+clic, nunca al pintar el botón.
 
 **Selección de calidad.** Orden por `altura × 1e7 + bitrate`, filtrado por el `content_type` del
 formato pedido y por la altura mínima si la calidad es personalizada. La lista ordenada se conserva
 para el respaldo de menor calidad.
+
+---
+
+## Diagnóstico: «el botón aparece pero no descarga»
+
+La extensión lleva un **registro de diagnóstico** pensado exactamente para esto. Cada paso relevante
+(barrido del DOM, estrategias probadas, respuesta del puente, variante elegida, despacho a
+`chrome.downloads`, interrupciones y reintentos) se anota en tres sitios:
+
+1. La **consola de la página** (F12), con el prefijo `[XVD]`; la del service worker usa `[XVD:sw]`.
+2. El popup: **General → Registro de diagnóstico**, en vivo, con un resumen arriba (versión, medios
+   detectados y, sobre todo, **si el puente del mundo MAIN responde**).
+3. Un botón **«Copiar informe»** que genera un texto listo para pegar en un informe de error:
+
+```
+# Informe de diagnóstico · Descargador de medios para X
+versión extensión : 2.1.0
+fecha             : 2026-09-17T21:40:12.008Z
+navegador         : Mozilla/5.0 (Windows NT 10.0; Win64; x64) … Chrome/153.0.0.0 Safari/537.36
+pestaña           : https://x.com/…
+videos / imágenes : 2 / 5
+puente MAIN       : activo
+21:40:12.114  INFO  video       Clic en «Descargar»  {"idPoster":"2100475372890472448","ajustes":"auto/max"}
+21:40:12.145  INFO  resolucion  Buscando el manifiesto del video  {"puenteActivo":true,…}
+21:40:12.312  INFO  resolucion  Respuesta del puente del mundo de la página  {"medios":1,"variantes":6}
+21:40:12.318  INFO  video       Variante elegida  {"resolucion":"2160p","bitrate":25128000}
+21:40:12.401  INFO  descarga    chrome.downloads.download despachado  {"id":42,"archivo":"X Videos/…"}
+```
+
+Cómo leerlo:
+
+| Señal en el registro | Significado |
+| --- | --- |
+| `puente MAIN: SIN RESPUESTA` | `page-bridge.js` no se cargó: **recarga la pestaña** de X o reinstala la extensión. |
+| `Respuesta del puente … {"medios":0}` | El puente funciona pero X cambió su estructura: sus props ya no traen el manifiesto. |
+| `Ninguna estrategia encontró el manifiesto` | Ni fibras, ni estado, ni red, ni `src` directo: el video no está disponible para la página. |
+| `No se pudo identificar el video entre los candidatos` | Hay varios videos y el póster aún no estaba: reproduce el video y reinténtalo. |
+| `Descarga interrumpida … codigo: SERVER_FORBIDDEN` | El CDN de X rechazó la descarga (red, antivirus o bloqueo). |
+| `codigo: FILE_ACCESS_DENIED` / `FILE_NO_SPACE` | Problema de carpeta de destino o de disco. |
+| Estrategia de red con `medios: 1` y error de HLS | El video solo se sirve como stream: activa el modo avanzado HLS. |
+
+El registro se guarda en `chrome.storage.session` (memoria de la sesión, máximo 400 entradas) y
+**nunca se envía a ningún servidor**. El botón «Borrar» lo vacía.
 
 ---
 
@@ -390,23 +480,47 @@ Los mensajes de error del service worker se traducen desde los códigos de `chro
 - Comprobar la sintaxis de los scripts:
 
   ```bash
-  node --check content.js && node --check images.js && node --check background.js && node --check popup.js
+  node --check content.js && node --check images.js && node --check page-bridge.js \
+    && node --check background.js && node --check popup.js
   ```
 
 - Ejecutar las pruebas (Node 18+, sin dependencias):
 
   ```bash
-  node tools/test.js        # 43 pruebas: variantes, calidad, nombres, HLS, imágenes
-  node tools/check-popup.js # coherencia popup.html ↔ popup.js y pestañas
+  node tools/test.js        # 50 pruebas: variantes, calidad, nombres, HLS, imágenes, puente
+  node tools/check-popup.js # coherencia popup.html ↔ popup.js, pestañas y estructura HTML
   ```
 
-  `tools/test.js` carga `content.js` e `images.js` en contextos aislados con stubs del navegador y
-  valida la selección de la máxima calidad y resolución, los respaldos de formato, la reescritura de
-  `name=`/`format=`, la cadena de degradación, la deduplicación de URLs, el saneado de rutas
-  (`../../etc/passwd` → `etc/passwd`), los nombres indexados de galería y el análisis de manifiestos
-  HLS (incluidos streams cifrados y segmentos CMAF).
+  `tools/test.js` carga `content.js`, `images.js` y `page-bridge.js` en contextos aislados con stubs
+  del navegador y valida la selección de la máxima calidad y resolución, los respaldos de formato, la
+  reescritura de `name=`/`format=`, la cadena de degradación, la deduplicación de URLs, el saneado de
+  rutas (`../../etc/passwd` → `etc/passwd`), los nombres indexados de galería, el análisis de
+  manifiestos HLS (streams cifrados y segmentos CMAF) y la extracción desde las props de React, con
+  los datos reales del tweet `2100475914182107353` (variante máxima 3828×2160).
+
+- Prueba end-to-end en un navegador de verdad (requiere Python 3.9+ y Playwright):
+
+  ```bash
+  pip install playwright && playwright install chromium
+  python tools/e2e-test.py            # sin ventana
+  python tools/e2e-test.py --headed   # viendo el navegador
+  ```
+
+  Lanza su propio Chromium con la extensión cargada y un **perfil temporal** (no toca tu Chrome, tus
+  ajustes ni tus descargas), sirve una página que imita el DOM de X para el tweet real del fixture,
+  pulsa los botones y comprueba las 24 aserciones: inyección de botones y contadores, pestañas del
+  popup, guardado de ajustes, elección de la variante 3828×2160 y **descarga real desde el CDN de X**
+  (~40 MB), cadena de degradación de imágenes (`orig → 4096x4096 → large → medium`), lote de
+  «Descargar todas» con nombres indexados, avisos en español, no interferencia con el lightbox y el
+  panel de diagnóstico. Deja capturas en `%TEMP%\xvd-e2e\shots`.
+
+  > Nota: las descargas que lanza `chrome.downloads` **no** pasan por el interceptor de Playwright,
+  > así que el vídeo se descarga de verdad desde X. Las imágenes usan rutas de prueba (`XVDTESTIMG…`)
+  > que no existen en el CDN: eso permite verificar la cascada de resolución viendo cómo el servidor
+  > devuelve `SERVER_BAD_CONTENT` y la extensión prueba la siguiente calidad.
 
 - Depuración:
+  - **Registro de diagnóstico:** popup → *General* → «Registro de diagnóstico» (o la consola con `[XVD]`).
   - **Content scripts:** consola de la página de X (F12) → contexto de la extensión.
   - **Service worker:** `chrome://extensions/` → *Descargador de medios para X* → «service worker».
   - **Popup:** clic derecho sobre el popup → *Inspeccionar*.
@@ -420,10 +534,11 @@ Los mensajes de error del service worker se traducen desde los códigos de `chro
 | Criterio | Estado |
 | --- | --- |
 | El botón aparece en todos los videos visibles y en los nuevos (scroll infinito) | ✅ `MutationObserver` + `ResizeObserver` + barridos programados |
-| La descarga se realiza en máxima calidad por defecto | ✅ ordenación por resolución y bitrate |
+| La descarga se realiza en máxima calidad por defecto | ✅ **verificado end-to-end**: el tweet de prueba descarga la variante 3828×2160 (4K, 25 Mbps) real, ~40 MB |
 | El formato elegido en el popup se respeta en cada descarga | ✅ `content_type` filtrado + respaldo avisado |
-| No interfiere con la reproducción ni con los controles nativos | ✅ el `<video>` nunca se modifica |
+| No interfiere con la reproducción ni con los controles nativos | ✅ el `<video>` nunca se modifica; verificado que el clic no se propaga |
 | Reintentos y respaldo de menor calidad | ✅ 3 intentos de resolución + respaldo encadenado |
+| El manifiesto se lee aunque el content script viva en un mundo aislado | ✅ `page-bridge.js` en el mundo MAIN (probado contra las fibras de React) |
 
 ### Imágenes
 

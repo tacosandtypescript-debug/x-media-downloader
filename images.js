@@ -46,6 +46,9 @@
     medium: 'media'
   };
 
+  /** Registro de diagnóstico compartido con el núcleo (content.js). */
+  const log = typeof core.log === 'function' ? core.log : () => {};
+
   /** Caché de comprobaciones de disponibilidad: url -> { ok, ts } */
   const probeCache = new Map();
   const PROBE_TTL = 5 * 60 * 1000;
@@ -228,8 +231,13 @@
   /** Devuelve el primer candidato disponible, degradando si hace falta. */
   async function pickAvailableCandidate(candidates) {
     for (let i = 0; i < candidates.length; i++) {
+      const t0 = Date.now();
       // eslint-disable-next-line no-await-in-loop
       const ok = await probeImage(candidates[i].url);
+      log('info', 'imagen', 'Comprobando resolución ' + candidates[i].resolution, {
+        disponible: ok,
+        ms: Date.now() - t0
+      });
       if (ok) return { candidate: candidates[i], index: i };
     }
     return null;
@@ -505,6 +513,9 @@
     '[data-testid="tweetPhoto"]'
   ].join(', ');
 
+  /** Diagnóstico: se anota el recuento solo cuando cambia. */
+  let lastLoggedImageScan = '';
+
   function scanImages() {
     const cfg = core.getSettings();
     if (!cfg.enabled || !cfg.imagesEnabled) {
@@ -555,6 +566,24 @@
         /* idem */
       }
     }
+
+    const resumen =
+      candidates.size +
+      ' img/' +
+      document.querySelectorAll('button.xvd-button--image').length +
+      ' botones/' +
+      galleries.size +
+      ' galerías';
+    if (resumen !== lastLoggedImageScan) {
+      lastLoggedImageScan = resumen;
+      log('info', 'imagen', 'Barrido del DOM (imágenes)', {
+        candidatas: candidates.size,
+        conBoton: document.querySelectorAll('button.xvd-button--image').length,
+        galerias: galleries.size,
+        botonesGaleria: document.querySelectorAll('button.xvd-button--gallery').length,
+        omitidasPorTamaño: Array.from(candidates.values()).filter((c) => isTooSmall(c.element)).length
+      });
+    }
   }
 
   /* =======================================================================
@@ -578,7 +607,10 @@
   async function downloadImage(rawUrl, options) {
     const cfg = core.getSettings();
     const plan = planImageDownload(rawUrl, cfg);
-    if (plan.error) throw new Error(plan.error);
+    if (plan.error) {
+      log('error', 'imagen', 'No se pudo planificar la descarga', { motivo: plan.error, url: rawUrl });
+      throw new Error(plan.error);
+    }
     if (plan.notice && !options.silentNotice) core.toast(plan.notice, 'warn', 7000);
 
     const key = dedupeKey(rawUrl, cfg);
@@ -589,13 +621,33 @@
     let candidates = plan.ordered;
     let degradedIndex = 0;
 
+    log('info', 'imagen', 'Plan de descarga de imagen', {
+      ruta: mediaKey(rawUrl),
+      formatoPedido: cfg.imageFormat,
+      formatoFinal: plan.format,
+      resolucionPedida: cfg.imageResolution,
+      candidatos: candidates.map((c) => c.resolution),
+      verificar: cfg.imageVerify !== false,
+      respaldo: cfg.imageFallback !== false
+    });
+
     if (cfg.imageVerify !== false && candidates.length > 1) {
+      const t0 = Date.now();
       const picked = await pickAvailableCandidate(candidates);
       if (!picked) {
+        log('error', 'imagen', 'Ninguna resolución del CDN está disponible', {
+          candidatos: candidates.map((c) => c.resolution),
+          ms: Date.now() - t0
+        });
         throw new Error('No se pudo descargar la imagen: ninguna resolución está disponible.');
       }
       degradedIndex = picked.index;
       candidates = candidates.slice(picked.index);
+      log(degradedIndex > 0 ? 'warn' : 'info', 'imagen', 'Comprobación de disponibilidad', {
+        elegida: picked.candidate.resolution,
+        descartadas: degradedIndex,
+        ms: Date.now() - t0
+      });
       if (degradedIndex > 0) {
         core.toast('No se pudo descargar en resolución máxima, usando resolución alternativa.', 'warn', 6000);
       }
@@ -670,12 +722,20 @@
 
   async function handleImageClick(element, button) {
     core.setButtonState(button, 'loading', 'Preparando…');
+    const cfg = core.getSettings();
     try {
       const url = readElementUrl(element);
       if (!isTweetImageUrl(url)) throw new Error('No se pudo obtener la imagen en la máxima resolución.');
 
       const gallery = galleryInfo(element);
       const context = core.getTweetContext(element);
+      log('info', 'imagen', 'Clic en «Descargar»', {
+        resolucion: cfg.imageResolution,
+        formato: cfg.imageFormat,
+        indice: gallery.index + 1 + '/' + gallery.total,
+        ruta: mediaKey(url)
+      });
+
       const result = await downloadImage(url, {
         context,
         index: gallery.index + 1,
@@ -683,6 +743,7 @@
       });
 
       if (result && result.duplicate) {
+        log('info', 'imagen', 'Imagen duplicada: se omite', { ruta: mediaKey(url) });
         core.setButtonState(button, 'done', 'Ya descargada');
         return;
       }
@@ -690,6 +751,10 @@
       core.setButtonState(button, 'done', result.degraded ? 'Descargada (alt.)' : 'Descargada');
       core.toast('Descarga iniciada: ' + result.filename, 'success', 4000);
     } catch (err) {
+      log('error', 'imagen', 'Fallo al preparar la descarga de la imagen', {
+        mensaje: core.errorMessage(err),
+        url: readElementUrl(element)
+      });
       core.setButtonState(button, 'error', 'Error');
       core.toast(core.errorMessage(err), 'error', 7000);
     }
@@ -731,6 +796,12 @@
       let failed = 0;
       let duplicates = 0;
 
+      log('info', 'imagen', 'Descargar todas: lote iniciado', {
+        imagenes: items.length,
+        celdas: cells.length,
+        rutas: items.map((it) => mediaKey(it.url)).slice(0, 6)
+      });
+
       for (let i = 0; i < items.length; i++) {
         core.setButtonState(button, 'loading', 'Descargando ' + (i + 1) + '/' + items.length + '…');
         try {
@@ -744,11 +815,21 @@
           else started++;
         } catch (err) {
           failed++;
+          log('error', 'imagen', 'Fallo en la imagen ' + (i + 1) + ' del lote', {
+            ruta: mediaKey(items[i].url),
+            motivo: core.errorMessage(err)
+          });
           core.toast('Imagen ' + (i + 1) + ': ' + core.errorMessage(err), 'error', 6000);
         }
         // Descarga secuencial: se deja respirar al gestor de descargas.
         await core.sleep(350);
       }
+
+      log(failed ? 'warn' : 'info', 'imagen', 'Descargar todas: lote terminado', {
+        iniciadas: started,
+        duplicadas: duplicates,
+        fallidas: failed
+      });
 
       if (failed === 0 && duplicates === 0) {
         core.setButtonState(button, 'done', started + ' descargadas');

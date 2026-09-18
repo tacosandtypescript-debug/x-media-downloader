@@ -743,6 +743,38 @@ html.xvd-hover-only .xvd-button[data-state="loading"] {
   margin-bottom: 10px;
 }
 
+/* ---- Registro de diagnóstico ---- */
+
+.xvd-log {
+  margin: 8px 0 0;
+  padding: 10px;
+  max-height: 190px;
+  overflow: auto;
+  border-radius: 10px;
+  border: 1px solid var(--xvd-border);
+  background: var(--xvd-surface-2);
+  color: var(--xvd-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 10.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.xvd-diag__actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.xvd-diag__actions .xvd-btn {
+  flex: 1 1 auto;
+  padding: 7px 8px;
+  font-size: 11.5px;
+}
+
 /* ---- Pie ---- */
 
 .xvd-popup__footer {

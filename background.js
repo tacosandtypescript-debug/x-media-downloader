@@ -1,14 +1,71 @@
 /**
- * Descargador de videos para X — Service Worker (MV3)
+ * Descargador de medios para X — Service Worker (MV3)
  * ---------------------------------------------------------------------------
  * - Valida y ejecuta las descargas con chrome.downloads.download.
  * - Traduce los errores de la API de descargas al español.
  * - Vigila el estado de cada descarga y avisa al content script del resultado
  *   (para poder reintentar automáticamente con una calidad inferior).
+ * - Guarda el REGISTRO DE DIAGNÓSTICO que envían los content scripts en
+ *   chrome.storage.session, para que el popup pueda mostrarlo.
  * - Inicializa los ajustes por defecto en la primera instalación.
  */
 
 'use strict';
+
+/** Clave del registro de diagnóstico en chrome.storage.session. */
+const LOG_KEY = 'xvd_log';
+const LOG_MAX = 400;
+
+/** Escrituras del registro en serie (evita perder entradas por concurrencia). */
+let logQueue = Promise.resolve();
+
+function normalizarEntrada(entry) {
+  const nivel = entry && entry.level;
+  return {
+    t: Number(entry && entry.t) || Date.now(),
+    level: nivel === 'error' ? 'error' : nivel === 'warn' ? 'warn' : 'info',
+    area: String((entry && entry.area) || 'general').slice(0, 24),
+    msg: String((entry && entry.msg) || '').slice(0, 400),
+    detail: String((entry && entry.detail) || '').slice(0, 900)
+  };
+}
+
+function appendLog(entry) {
+  const limpia = normalizarEntrada(entry);
+  logQueue = logQueue
+    .then(async () => {
+      const stored = await chrome.storage.session.get(LOG_KEY);
+      const lista = Array.isArray(stored[LOG_KEY]) ? stored[LOG_KEY] : [];
+      lista.push(limpia);
+      if (lista.length > LOG_MAX) lista.splice(0, lista.length - LOG_MAX);
+      await chrome.storage.session.set({ [LOG_KEY]: lista });
+    })
+    .catch(() => {
+      /* si la sesión no está disponible, el registro se pierde sin más */
+    });
+  return logQueue;
+}
+
+/** Anota en el registro y en la consola del service worker. */
+function bgLog(level, area, msg, detail) {
+  try {
+    const fn = level === 'error' ? console.error : level === 'warn' ? console.warn : console.log;
+    fn('[XVD:sw]', area + ':', msg, detail === undefined ? '' : detail);
+  } catch (_) {
+    /* consola no disponible */
+  }
+  let texto = '';
+  if (detail !== undefined && detail !== null) {
+    texto = typeof detail === 'string' ? detail : (() => {
+      try {
+        return JSON.stringify(detail);
+      } catch (_) {
+        return String(detail);
+      }
+    })();
+  }
+  return appendLog({ t: Date.now(), level, area, msg, detail: texto });
+}
 
 const DEFAULT_SETTINGS = {
   /* --- General --- */
@@ -168,6 +225,34 @@ function notifyTab(tabId, payload) {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message !== 'object') return undefined;
 
+  if (message.type === 'XVD_LOG') {
+    appendLog(message.entry || {});
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  if (message.type === 'XVD_GET_LOG') {
+    chrome.storage.session
+      .get(LOG_KEY)
+      .then((stored) =>
+        sendResponse({
+          ok: true,
+          log: stored[LOG_KEY] || [],
+          version: chrome.runtime.getManifest().version
+        })
+      )
+      .catch((error) => sendResponse({ ok: false, error: String(error) }));
+    return true;
+  }
+
+  if (message.type === 'XVD_CLEAR_LOG') {
+    chrome.storage.session
+      .remove(LOG_KEY)
+      .then(() => sendResponse({ ok: true }))
+      .catch(() => sendResponse({ ok: false }));
+    return true;
+  }
+
   if (message.type === 'XVD_DOWNLOAD') {
     handleDownloadRequest(message, sender)
       .then((result) => sendResponse(result))
@@ -210,6 +295,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 async function handleDownloadRequest(message, sender) {
   const rawUrl = String(message.url || '');
   if (!/^https?:\/\//i.test(rawUrl)) {
+    bgLog('error', 'descarga', 'URL rechazada por el service worker', { url: rawUrl });
     return { ok: false, error: 'La URL del video no es válida o no se pudo resolver.' };
   }
 
@@ -226,10 +312,23 @@ async function handleDownloadRequest(message, sender) {
 
     const tabId = sender && sender.tab && typeof sender.tab.id === 'number' ? sender.tab.id : -1;
     await rememberDownload(downloadId, { tabId, filename, url: rawUrl, startedAt: Date.now() });
+    bgLog('info', 'descarga', 'chrome.downloads.download despachado', {
+      id: downloadId,
+      archivo: filename,
+      host: (() => {
+        try {
+          return new URL(rawUrl).host;
+        } catch (_) {
+          return '';
+        }
+      })(),
+      guardarComo: saveAs
+    });
 
     return { ok: true, downloadId, filename };
   } catch (error) {
     const raw = error && error.message ? error.message : String(error);
+    bgLog('error', 'descarga', 'chrome.downloads.download falló', { archivo: filename, motivo: raw });
     if (/Invalid URL|url/i.test(raw) && /invalid/i.test(raw)) {
       return { ok: false, error: 'La URL del video no es válida.' };
     }
@@ -258,6 +357,10 @@ async function handleDownloadDelta(delta) {
 
   if (delta.state.current === 'complete') {
     await forgetDownload(delta.id);
+    bgLog('info', 'descarga', 'Descarga completada (service worker)', {
+      id: delta.id,
+      archivo: record.filename
+    });
     notifyTab(record.tabId, {
       type: 'XVD_DOWNLOAD_EVENT',
       state: 'complete',
@@ -270,6 +373,19 @@ async function handleDownloadDelta(delta) {
   if (delta.state.current === 'interrupted') {
     await forgetDownload(delta.id);
     const code = delta.error && delta.error.current ? delta.error.current : '';
+    bgLog('error', 'descarga', 'Descarga interrumpida (service worker)', {
+      id: delta.id,
+      archivo: record.filename,
+      codigo: code,
+      detalle: translateError(code),
+      host: (() => {
+        try {
+          return new URL(record.url).host;
+        } catch (_) {
+          return '';
+        }
+      })()
+    });
     notifyTab(record.tabId, {
       type: 'XVD_DOWNLOAD_EVENT',
       state: 'interrupted',

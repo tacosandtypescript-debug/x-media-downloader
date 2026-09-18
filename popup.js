@@ -53,7 +53,15 @@ const IMAGE_FORMAT_HINTS = {
 const TABS = ['videos', 'imagenes', 'general'];
 const LAST_TAB_KEY = 'xvd_active_tab';
 
+/** Clave del registro de diagnóstico (chrome.storage.session). */
+const LOG_KEY = 'xvd_log';
+const LOG_VISIBLE = 80;
+
 const elements = {};
+
+/** Última respuesta del content script y URL de la pestaña, para el informe. */
+let ultimoPing = null;
+let ultimoTabUrl = '';
 
 /* =======================================================================
  * Utilidades
@@ -140,6 +148,7 @@ function activateTab(name) {
     panel.hidden = !active;
   });
   setLocal({ [LAST_TAB_KEY]: target });
+  if (target === 'general') renderDiagnostico();
 }
 
 function initTabs() {
@@ -252,6 +261,80 @@ const save = (() => {
 })();
 
 /* =======================================================================
+ * Registro de diagnóstico
+ * ===================================================================== */
+
+function leerLog() {
+  return new Promise((resolve) => {
+    try {
+      chrome.storage.session.get(LOG_KEY, (stored) => {
+        void chrome.runtime.lastError;
+        const lista = stored && Array.isArray(stored[LOG_KEY]) ? stored[LOG_KEY] : [];
+        resolve(lista);
+      });
+    } catch (_) {
+      resolve([]);
+    }
+  });
+}
+
+function horaDe(ts) {
+  const d = new Date(Number(ts) || Date.now());
+  const p = (n, l) => String(n).padStart(l || 2, '0');
+  return p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds()) + '.' + p(d.getMilliseconds(), 3);
+}
+
+function formatearEntrada(entrada) {
+  const nivel = String(entrada.level || 'info').toUpperCase().padEnd(5, ' ');
+  const area = String(entrada.area || '').padEnd(11, ' ');
+  return horaDe(entrada.t) + '  ' + nivel + ' ' + area + ' ' + (entrada.msg || '') + (entrada.detail ? '  ' + entrada.detail : '');
+}
+
+function construirInforme(lista) {
+  const lineas = [
+    '# Informe de diagnóstico · Descargador de medios para X',
+    'versión extensión : ' + chrome.runtime.getManifest().version,
+    'fecha             : ' + new Date().toISOString(),
+    'navegador         : ' + navigator.userAgent,
+    'pestaña           : ' + (ultimoTabUrl || '(ninguna)'),
+    'videos / imágenes : ' + (ultimoPing ? (ultimoPing.videos || 0) + ' / ' + (ultimoPing.images || 0) : 'sin respuesta'),
+    'puente MAIN       : ' +
+      (ultimoPing ? (ultimoPing.bridge ? 'activo' : 'SIN RESPUESTA') : 'desconocido') +
+      (ultimoPing && ultimoPing.bridgeTimeouts ? ' (tiempos agotados: ' + ultimoPing.bridgeTimeouts + ')' : ''),
+    'entradas          : ' + lista.length,
+    ''
+  ];
+  for (const entrada of lista) lineas.push(formatearEntrada(entrada));
+  return lineas.join('\n');
+}
+
+let informeActual = '';
+
+async function renderDiagnostico() {
+  if (!elements.diagLog) return;
+  const lista = await leerLog();
+  const resumen = [chrome.runtime.getManifest().version];
+
+  if (ultimoPing) {
+    resumen.push((ultimoPing.videos || 0) + ' vídeos · ' + (ultimoPing.images || 0) + ' imágenes');
+    resumen.push('puente ' + (ultimoPing.bridge ? 'activo ✓' : 'SIN RESPUESTA'));
+  } else {
+    resumen.push('content script sin respuesta en esta pestaña');
+  }
+  resumen.push(lista.length + ' entradas');
+  elements.diagSummary.textContent = resumen.join(' · ');
+
+  const visibles = lista.slice(-LOG_VISIBLE);
+  elements.diagLog.textContent = visibles.length
+    ? visibles.map(formatearEntrada).join('\n')
+    : 'Sin registros todavía. Abre un vídeo o una imagen en X y pulsa «Descargar».';
+  elements.diagLog.scrollTop = elements.diagLog.scrollHeight;
+
+  informeActual = construirInforme(lista);
+  return lista;
+}
+
+/* =======================================================================
  * Estado de la pestaña activa
  * ===================================================================== */
 
@@ -264,9 +347,11 @@ function pingTab(tabId) {
   });
 }
 
-/** Si el content script no responde (pestaña abierta antes de instalar), lo inyecta. */
+/** Si los content scripts no responden (pestaña abierta antes de instalar), los inyecta. */
 async function ensureContentScript(tabId) {
   try {
+    // El puente va al mundo de la página; el resto, al mundo aislado.
+    await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', files: ['page-bridge.js'] });
     await chrome.scripting.insertCSS({ target: { tabId }, files: ['styles.css'] });
     await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js', 'images.js'] });
     return true;
@@ -294,6 +379,8 @@ async function updateTabStatus() {
       await ensureContentScript(tab.id);
       response = await pingTab(tab.id);
     }
+    ultimoTabUrl = tab.url || '';
+    ultimoPing = response || null;
 
     if (response && typeof response.videos === 'number') {
       const videos = response.videos;
@@ -315,6 +402,8 @@ async function updateTabStatus() {
     node.textContent = 'No se pudo consultar la pestaña activa.';
     node.className = 'xvd-popup__status xvd-popup__status--muted';
   }
+
+  if (!$('panel-general') || !$('panel-general').hidden) renderDiagnostico();
 }
 
 /* =======================================================================
@@ -344,6 +433,8 @@ async function init() {
   elements.saveStatus = $('saveStatus');
   elements.tabStatus = $('tabStatus');
   elements.generalStatus = $('generalStatus');
+  elements.diagLog = $('diagLog');
+  elements.diagSummary = $('diagSummary');
 
   const settings = await getStored(DEFAULT_SETTINGS);
   fillForm(settings);
@@ -391,7 +482,48 @@ async function init() {
     });
   });
 
+  // --- Registro de diagnóstico -------------------------------------------
+  $('diagRefresh').addEventListener('click', async () => {
+    await updateTabStatus();
+    await renderDiagnostico();
+    status('Actualizado ✓', 'ok');
+  });
+
+  $('diagClear').addEventListener('click', () => {
+    try {
+      chrome.storage.session.remove(LOG_KEY, () => {
+        void chrome.runtime.lastError;
+        renderDiagnostico();
+      });
+    } catch (_) {
+      /* sesión no disponible */
+    }
+    status('Registro borrado', 'ok');
+  });
+
+  $('diagCopy').addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(informeActual);
+      status('Informe copiado ✓', 'ok');
+    } catch (_) {
+      // Alternativa si el portapapeles está bloqueado: seleccionar el texto.
+      try {
+        const rango = document.createRange();
+        rango.selectNodeContents(elements.diagLog);
+        const seleccion = window.getSelection();
+        seleccion.removeAllRanges();
+        seleccion.addRange(rango);
+      } catch (_) {
+        /* nada más que hacer */
+      }
+      status('Copia el texto con Ctrl+C', 'error');
+    }
+  });
+
   updateTabStatus();
+  setInterval(() => {
+    if (!document.hidden) renderDiagnostico();
+  }, 2500);
 }
 
 document.addEventListener('DOMContentLoaded', init);

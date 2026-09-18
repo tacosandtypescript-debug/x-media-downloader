@@ -53,6 +53,9 @@ function loadContentScript() {
       },
       runtime: { onMessage: { addListener: () => {} }, lastError: null }
     },
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    postMessage: () => {},
     module: { exports: {} }
   };
   sandbox.window = sandbox;
@@ -135,6 +138,46 @@ function loadImagesModule(defaults) {
 
 const images = loadImagesModule(IMAGE_DEFAULTS);
 const img = images.api;
+
+/* ------------------------------- carga del puente del mundo MAIN -- */
+
+/**
+ * Carga page-bridge.js con un DOM mínimo simulado. Se pueden inyectar globales
+ * de "página" (window.__INITIAL_STATE__…) y props de React en los nodos.
+ */
+function loadBridge(options) {
+  const opts = options || {};
+  const video = {
+    tagName: 'VIDEO',
+    parentElement: null,
+    getAttribute: (name) => (name === 'poster' ? opts.poster || null : null),
+    closest: () => opts.article || null
+  };
+  if (opts.fiberProps) video['__reactFiber$test'] = { memoizedProps: opts.fiberProps, return: null };
+  if (opts.reactProps) video['__reactProps$test'] = opts.reactProps;
+  if (opts.article && opts.articleProps) opts.article['__reactProps$test'] = opts.articleProps;
+
+  const sandbox = {
+    console,
+    setTimeout,
+    clearTimeout,
+    URL,
+    document: {
+      querySelectorAll: (selector) => (selector === 'video' ? [video] : [])
+    },
+    module: { exports: {} }
+  };
+  sandbox.window = sandbox;
+  sandbox.globalThis = sandbox;
+  sandbox.addEventListener = () => {};
+  sandbox.postMessage = () => {};
+  if (opts.pageState) sandbox.__INITIAL_STATE__ = opts.pageState;
+
+  const code = fs.readFileSync(path.join(ROOT, 'page-bridge.js'), 'utf8');
+  vm.createContext(sandbox);
+  vm.runInContext(code, sandbox, { filename: 'page-bridge.js' });
+  return { api: sandbox.module.exports, video, sandbox };
+}
 
 /* ------------------------------------------------------------- mini runner -- */
 
@@ -566,6 +609,140 @@ test('extrae la URL de una imagen de tarjeta con background-image', () => {
   const style = 'background-image: url("https://pbs.twimg.com/card_img/17/abc?format=jpg&name=small");';
   assert.strictEqual(img.extractBackgroundUrl(style), 'https://pbs.twimg.com/card_img/17/abc?format=jpg&name=small');
   assert.strictEqual(img.extractBackgroundUrl('background: red'), '');
+});
+
+/* ------------------------------------- puente del mundo MAIN (fibras) -- */
+
+console.log('\nPuente del mundo de la página (page-bridge.js)');
+
+// Datos REALES del tweet 2100475914182107353 (@axichuhai), tal y como los
+// publica X: 1 manifiesto HLS y 5 variantes MP4, la mayor en 3828x2160.
+const MEDIA_ID = '2100475372890472448';
+const QUOTED_ID = '2100395179458924545';
+const MP4 = (id, res, bitrate, hash) => ({
+  content_type: 'video/mp4',
+  bitrate,
+  url: 'https://video.twimg.com/amplify_video/' + id + '/vid/avc1/' + res + '/' + hash + '.mp4'
+});
+
+const REAL_VIDEO_MEDIA = {
+  media_url_https: 'https://pbs.twimg.com/amplify_video_thumb/' + MEDIA_ID + '/img/5SNhLYxWgrkiSWFf.jpg',
+  video_info: {
+    duration_millis: 23433,
+    variants: [
+      {
+        content_type: 'application/x-mpegURL',
+        url: 'https://video.twimg.com/amplify_video/' + MEDIA_ID + '/pl/grZ8GF8UaJNPNPVu.m3u8'
+      },
+      MP4(MEDIA_ID, '478x270', 256000, 'cxTf03KP2JFp25vd'),
+      MP4(MEDIA_ID, '638x360', 832000, 'NW26MKSvT_xJQoCS'),
+      MP4(MEDIA_ID, '1276x720', 2176000, 'xddoME-f6jxBRtFG'),
+      MP4(MEDIA_ID, '1914x1080', 10368000, 'l_on5WoZPWauRpZj'),
+      MP4(MEDIA_ID, '3828x2160', 25128000, 'LQJXFMsY2K_Fa_F5')
+    ]
+  }
+};
+
+const QUOTED_VIDEO_MEDIA = {
+  media_url_https: 'https://pbs.twimg.com/amplify_video_thumb/' + QUOTED_ID + '/img/yo7llJIZrQ7qbKTZ.jpg',
+  video_info: {
+    duration_millis: 182666,
+    variants: [
+      {
+        content_type: 'application/x-mpegURL',
+        url: 'https://video.twimg.com/amplify_video/' + QUOTED_ID + '/pl/oc_6VLKpLtwcorAH.m3u8?v=1ae'
+      },
+      MP4(QUOTED_ID, '1298x720', 2176000, 'QtSdIIKgaqLM5FZd'),
+      MP4(QUOTED_ID, '3840x2128', 25128000, 'ztzycpnzv-9UUg8L')
+    ]
+  }
+};
+
+const POSTER = REAL_VIDEO_MEDIA.media_url_https;
+
+test('lee el manifiesto desde las props de React del reproductor (fibras)', () => {
+  const bridge = loadBridge({ poster: POSTER, fiberProps: { mediaDetails: [REAL_VIDEO_MEDIA] } });
+  const media = bridge.api.collectFor(MEDIA_ID, POSTER);
+  assert.strictEqual(media.length, 1);
+  assert.strictEqual(media[0].id, MEDIA_ID);
+  assert.strictEqual(media[0].variants.length, 6);
+});
+
+test('lee el manifiesto desde window.__INITIAL_STATE__ si no hay fibras', () => {
+  const bridge = loadBridge({
+    poster: POSTER,
+    pageState: { globalObjects: { tweets: { '2100475914182107353': { mediaDetails: [REAL_VIDEO_MEDIA, QUOTED_VIDEO_MEDIA] } } } }
+  });
+  const media = bridge.api.collectFor(MEDIA_ID, POSTER);
+  const ids = media.map((m) => m.id);
+  assert.ok(ids.includes(MEDIA_ID), 'debe encontrar el video del tweet principal: ' + ids.join(','));
+  assert.ok(ids.includes(QUOTED_ID), 'y tambien el de la cita, para desambiguar por id');
+});
+
+test('sin pistas devuelve todas las entidades de la pagina', () => {
+  const bridge = loadBridge({
+    pageState: { a: { mediaDetails: [REAL_VIDEO_MEDIA, QUOTED_VIDEO_MEDIA] } }
+  });
+  const media = bridge.api.collectFor('', '');
+  assert.strictEqual(media.length, 2);
+});
+
+test('el saneado descarta variantes de hosts no permitidos', () => {
+  const bridge = loadBridge({});
+  const sucio = {
+    id: 'x',
+    poster: 'https://evil.example.com/p.jpg',
+    variants: [
+      { url: 'https://video.twimg.com/ok.mp4', contentType: 'video/mp4', bitrate: 1, height: 720 },
+      { url: 'https://evil.example.com/malo.mp4', contentType: 'video/mp4', bitrate: 9, height: 2160 },
+      { url: 'http://video.twimg.com/inseguro.mp4', contentType: 'video/mp4' }
+    ]
+  };
+  const limpio = bridge.api.sanitizeEntity(sucio);
+  assert.strictEqual(limpio.video_info.variants.length, 1);
+  assert.strictEqual(limpio.video_info.variants[0].url, 'https://video.twimg.com/ok.mp4');
+  assert.strictEqual(limpio.media_url_https, '', 'el poster de otro host se descarta');
+});
+
+test('el saneado devuelve null si no queda ninguna variante valida', () => {
+  const bridge = loadBridge({});
+  assert.strictEqual(bridge.api.sanitizeEntity({ variants: [{ url: 'https://evil.example.com/x.mp4' }] }), null);
+  assert.strictEqual(bridge.api.sanitizeEntity(null), null);
+});
+
+test('allowedUrl solo acepta https de video.twimg.com y pbs.twimg.com', () => {
+  const bridge = loadBridge({});
+  assert.strictEqual(bridge.api.allowedUrl('https://video.twimg.com/a.mp4'), true);
+  assert.strictEqual(bridge.api.allowedUrl('https://pbs.twimg.com/media/a.jpg'), true);
+  assert.strictEqual(bridge.api.allowedUrl('http://video.twimg.com/a.mp4'), false);
+  assert.strictEqual(bridge.api.allowedUrl('https://video.twimg.com.evil.com/a.mp4'), false);
+  assert.strictEqual(bridge.api.allowedUrl('javascript:alert(1)'), false);
+});
+
+test('extremo a extremo: puente -> mundo aislado -> 3828x2160 y nombre _2160p', () => {
+  const bridge = loadBridge({ poster: POSTER, fiberProps: { mediaDetails: [REAL_VIDEO_MEDIA] } });
+  const crudo = bridge.api.collectFor(MEDIA_ID, POSTER);
+  const limpio = crudo.map(bridge.api.sanitizeEntity).filter(Boolean);
+
+  // El mundo aislado normaliza lo que le manda el puente…
+  const entidad = normalizeMediaEntity(limpio[0]);
+  assert.strictEqual(entidad.id, MEDIA_ID, 'el id debe coincidir con el del poster para poder desambiguar');
+
+  // …y planifica la descarga con la máxima calidad.
+  const plan = planDownload(entidad, config({ format: 'auto', quality: 'max' }));
+  assert.ok(!plan.error, plan.error);
+  assert.strictEqual(plan.ordered[0].height, 2160);
+  assert.strictEqual(plan.ordered[0].bitrate, 25128000);
+  assert.ok(plan.ordered[0].url.endsWith('/3828x2160/LQJXFMsY2K_Fa_F5.mp4'));
+
+  const nombre = buildFilename(
+    entidad,
+    plan.ordered[0],
+    { screenName: 'axichuhai', tweetId: '2100475914182107353', date: '2026-09-17' },
+    null,
+    config({ folder: 'X Videos' })
+  );
+  assert.strictEqual(nombre, 'X Videos/axichuhai_2100475372890472448_2160p.mp4');
 });
 
 /* ------------------------------------------------------------------ cierre -- */
