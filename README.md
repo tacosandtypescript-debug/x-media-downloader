@@ -94,14 +94,15 @@ Al ser la versión **2.0.0** se añade `images.js` y el permiso de host de `pbs.
 sustituir los archivos, pulsa **↻ (Actualizar)** en `chrome://extensions/` y **recarga** las
 pestañas de X para que se inyecte el nuevo módulo.
 
-### Actualizar a la versión 2.1.0 (importante: arregla la descarga de video)
+### Actualizar a la versión 2.1.x (importante: arregla la descarga de video)
 
 La 2.1.0 incorpora `page-bridge.js`, el puente en el mundo MAIN que arregla la extracción del
 manifiesto del video, y añade el **registro de diagnóstico**. Si notabas que el botón aparecía pero
-la descarga no arrancaba, esta es tu actualización.
+la descarga no arrancaba, esta es tu actualización. La 2.1.1 solo mejora el registro (tamaño,
+duración y ruta del archivo descargado).
 
 1. Sustituye los archivos (o `git pull` si clonaste el repositorio).
-2. En `chrome://extensions/`, pulsa **↻ (Actualizar)** y comprueba que la versión muestra **2.1.0**.
+2. En `chrome://extensions/`, pulsa **↻ (Actualizar)** y comprueba que la versión muestra **2.1.x**.
 3. **Recarga todas las pestañas de X**: el puente se inyecta al cargar la página, así que una pestaña
    abierta antes de actualizar no lo tendrá.
 4. Abre el popup → pestaña **General** → el resumen del diagnóstico debe indicar **`puente activo ✓`**.
@@ -314,17 +315,17 @@ La extensión lleva un **registro de diagnóstico** pensado exactamente para est
 
 ```
 # Informe de diagnóstico · Descargador de medios para X
-versión extensión : 2.1.0
-fecha             : 2026-09-17T21:40:12.008Z
+versión extensión : 2.1.1
+fecha             : 2026-09-18T04:05:15.825Z
 navegador         : Mozilla/5.0 (Windows NT 10.0; Win64; x64) … Chrome/153.0.0.0 Safari/537.36
-pestaña           : https://x.com/…
-videos / imágenes : 2 / 5
+pestaña           : https://x.com/i/history
+videos / imágenes : 2 / 7
 puente MAIN       : activo
-21:40:12.114  INFO  video       Clic en «Descargar»  {"idPoster":"2100475372890472448","ajustes":"auto/max"}
-21:40:12.145  INFO  resolucion  Buscando el manifiesto del video  {"puenteActivo":true,…}
-21:40:12.312  INFO  resolucion  Respuesta del puente del mundo de la página  {"medios":1,"variantes":6}
-21:40:12.318  INFO  video       Variante elegida  {"resolucion":"2160p","bitrate":25128000}
-21:40:12.401  INFO  descarga    chrome.downloads.download despachado  {"id":42,"archivo":"X Videos/…"}
+22:04:45.561  INFO  video       Clic en «Descargar»  {"idPoster":"2100475372890472448","puente":"activo"}
+22:04:45.580  INFO  resolucion  Respuesta del puente del mundo de la página  {"medios":2,"variantes":12,"ms":19}
+22:04:45.581  INFO  video       Variante elegida  {"resolucion":"2160p","bitrate":25128000}
+22:04:46.049  INFO  descarga    chrome.downloads.download despachado  {"id":1,"archivo":"X Videos/…_2160p.mp4"}
+22:04:50.441  INFO  descarga    Descarga completada  {"tamañoMB":39.5,"segundos":4.4,"ruta":"C:\\Users\\…\\X Videos\\…"}
 ```
 
 Cómo leerlo:
@@ -332,12 +333,16 @@ Cómo leerlo:
 | Señal en el registro | Significado |
 | --- | --- |
 | `puente MAIN: SIN RESPUESTA` | `page-bridge.js` no se cargó: **recarga la pestaña** de X o reinstala la extensión. |
+| `puente: primer uso en esta pestaña` | Normal en la primera descarga: el puente aún no había respondido. La línea siguiente lo confirma. |
 | `Respuesta del puente … {"medios":0}` | El puente funciona pero X cambió su estructura: sus props ya no traen el manifiesto. |
 | `Ninguna estrategia encontró el manifiesto` | Ni fibras, ni estado, ni red, ni `src` directo: el video no está disponible para la página. |
 | `No se pudo identificar el video entre los candidatos` | Hay varios videos y el póster aún no estaba: reproduce el video y reinténtalo. |
 | `Descarga interrumpida … codigo: SERVER_FORBIDDEN` | El CDN de X rechazó la descarga (red, antivirus o bloqueo). |
 | `codigo: FILE_ACCESS_DENIED` / `FILE_NO_SPACE` | Problema de carpeta de destino o de disco. |
 | Estrategia de red con `medios: 1` y error de HLS | El video solo se sirve como stream: activa el modo avanzado HLS. |
+
+Cuando una descarga termina bien, el registro incluye el **tamaño real**, los **segundos** que tardó y la
+**ruta en disco**; el aviso de la página muestra el tamaño: `Descarga completada: X Videos/…_2160p.mp4 (39,5 MB)`.
 
 El registro se guarda en `chrome.storage.session` (memoria de la sesión, máximo 400 entradas) y
 **nunca se envía a ningún servidor**. El botón «Borrar» lo vacía.

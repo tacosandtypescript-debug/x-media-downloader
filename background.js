@@ -357,15 +357,36 @@ async function handleDownloadDelta(delta) {
 
   if (delta.state.current === 'complete') {
     await forgetDownload(delta.id);
+
+    // Datos definitivos de la descarga: tamaño real y ruta en disco.
+    let bytes = 0;
+    let ruta = record.filename;
+    try {
+      const encontradas = await chrome.downloads.search({ id: delta.id });
+      const info = encontradas && encontradas[0];
+      if (info) {
+        bytes = info.fileSize || info.bytesReceived || 0;
+        ruta = info.filename || ruta;
+      }
+    } catch (_) {
+      /* sin datos de tamaño: no es crítico */
+    }
+    const segundos = record.startedAt ? Math.round((Date.now() - record.startedAt) / 100) / 10 : 0;
+
     bgLog('info', 'descarga', 'Descarga completada (service worker)', {
       id: delta.id,
-      archivo: record.filename
+      archivo: record.filename,
+      tamañoMB: bytes ? Math.round((bytes / 1048576) * 10) / 10 : 0,
+      segundos,
+      ruta
     });
     notifyTab(record.tabId, {
       type: 'XVD_DOWNLOAD_EVENT',
       state: 'complete',
       downloadId: delta.id,
-      filename: record.filename
+      filename: record.filename,
+      bytes,
+      seconds: segundos
     });
     return;
   }
@@ -373,11 +394,13 @@ async function handleDownloadDelta(delta) {
   if (delta.state.current === 'interrupted') {
     await forgetDownload(delta.id);
     const code = delta.error && delta.error.current ? delta.error.current : '';
+    const segundos = record.startedAt ? Math.round((Date.now() - record.startedAt) / 100) / 10 : 0;
     bgLog('error', 'descarga', 'Descarga interrumpida (service worker)', {
       id: delta.id,
       archivo: record.filename,
       codigo: code,
       detalle: translateError(code),
+      segundos,
       host: (() => {
         try {
           return new URL(record.url).host;

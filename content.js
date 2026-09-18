@@ -39,7 +39,7 @@
   const TOASTS_ID = 'xvd-toasts';
 
   /** Versión del núcleo (se muestra en el diagnóstico del popup). */
-  const coreVersion = '2.1.0';
+  const coreVersion = '2.1.1';
 
   const DEFAULT_SETTINGS = {
     /* --- General --- */
@@ -881,7 +881,7 @@
 
     log('info', 'resolucion', 'Buscando el manifiesto del video', {
       idPoster: mediaId || '(el póster aún no está)',
-      puenteActivo: bridgeResponded,
+      puente: bridgeResponded ? 'activo' : 'primer uso en esta pestaña (se comprueba ahora)',
       url: location.pathname
     });
 
@@ -1531,7 +1531,7 @@
     setButtonState(button, 'loading', 'Preparando…');
     log('info', 'video', 'Clic en «Descargar»', {
       idPoster: mediaIdFromVideo(video) || '(sin póster)',
-      puenteActivo: bridgeResponded,
+      puente: bridgeResponded ? 'activo' : 'primer uso en esta pestaña (se comprueba ahora)',
       ajustes: settings.format + '/' + settings.quality
     });
 
@@ -1813,11 +1813,16 @@
 
     if (event.state === 'complete') {
       pendingDownloads.delete(event.downloadId);
+      const nombre = record ? record.filename : 'archivo guardado';
+      const megas = event.bytes ? Math.round((event.bytes / 1048576) * 10) / 10 : 0;
+      const detalle = megas ? ' (' + String(megas).replace('.', ',') + ' MB' + (event.seconds ? ' en ' + String(event.seconds).replace('.', ',') + ' s' : '') + ')' : '';
       log('info', 'descarga', 'Descarga completada', {
         id: event.downloadId,
-        archivo: record ? record.filename : '(desconocido)'
+        archivo: nombre,
+        tamañoMB: megas,
+        segundos: event.seconds || 0
       });
-      toast('Descarga completada: ' + (record ? record.filename : 'archivo guardado'), 'success', 4000);
+      toast('Descarga completada: ' + nombre + detalle, 'success', 4500);
       return;
     }
 
