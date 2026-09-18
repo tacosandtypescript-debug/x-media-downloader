@@ -63,6 +63,27 @@ Toda la interfaz (botones, avisos y popup de opciones) está **en español**.
 - **Comprobación de disponibilidad** previa a la descarga para no guardar una página de error en
   lugar de la imagen.
 
+### Facebook
+
+- **Vídeos, reels, watch y fotos**, con botón en cada medio.
+- **Se elige la mejor pista CON audio**: `playable_url_quality_hd` (MP4 progresivo con el audio
+  dentro) antes que la versión ligera, y **nunca** un trozo del DASH (`bytestart`/`byteend`).
+- **Solo audio M4A de verdad**: el manifiesto DASH de Facebook sí trae la **pista de audio suelta**,
+  así que se descarga tal cual, **sin recomprimir** (a diferencia de Instagram).
+- **Solo audio MP3**: se decodifica esa pista (o el MP4) y se recodifica en tu equipo.
+- **Respaldo público**: si los datos internos no aparecen (páginas públicas sin sesión), se usa el
+  MP4 de `<meta property="og:video">`, avisando de que la calidad es menor (suele ser 360p).
+- **Las URLs se usan tal cual**: van firmadas (`oh=` / `oe=`) y caducan.
+- **Rescate si el CDN rechaza la descarga** (403): se reintenta bajando los bytes desde la página.
+
+**Límite honesto:** Facebook sirve el vídeo **con audio** como máximo en 720p. Las resoluciones
+mayores (1080p+) solo existen en el DASH con **audio y vídeo separados**, y unirlos requiere
+remultiplexar (un muxer o ffmpeg), que la extensión no incluye. Para el audio eso no es problema
+(se coge la pista suelta), pero para vídeo 1080p con sonido habría que añadir ese paso.
+
+**Igual que en Instagram:** Facebook exige sesión para casi todo, así que **esta parte la pruebas tú**;
+si algo falla, popup → **General** → **Copiar informe** y me lo pasas.
+
 ### Comunes
 
 - **Botones flotantes** con el estilo visual de X, que no bloquean ni modifican los controles
@@ -245,7 +266,9 @@ x-video-downloader/
 ├── manifest.json        Manifest V3: permisos, service worker, content scripts, popup
 ├── content.js           NÚCLEO compartido + módulo de VIDEO
 │                        (__XVD_CORE__: ajustes, avisos, botones, observadores, mensajería)
-├── images.js            Módulo de IMÁGENES (se carga después de content.js)
+├── images.js            Módulo de IMÁGENES de X (se carga después de content.js)
+├── instagram.js         Módulo de INSTAGRAM (fotos, carruseles, reels)
+├── facebook.js          Módulo de FACEBOOK (vídeo, reels, fotos y audio del DASH)
 ├── background.js        Service worker: valida, ejecuta y vigila las descargas
 ├── popup.html           Popup con pestañas Videos | Imágenes | General
 ├── popup.js             Lógica del popup (chrome.storage.sync)
@@ -256,9 +279,9 @@ x-video-downloader/
 │   └── icon128.png      Icono de instalación / Chrome Web Store
 ├── tools/
 │   ├── make-icons.js    Generador de iconos sin dependencias (opcional)
-│   ├── test.js          Pruebas de la lógica pura (57 comprobaciones)
+│   ├── test.js          Pruebas de la lógica pura (71 comprobaciones)
 │   ├── check-popup.js   Comprobación de coherencia popup.html ↔ popup.js
-│   ├── e2e-test.py      Prueba end-to-end en un Chromium real
+│   ├── e2e-test.py      Prueba end-to-end en un Chromium real (58 comprobaciones)
 │   ├── build-audio-test.js  Une la pista de audio de un HLS a un M4A (para pruebas)
 │   └── fixtures/
 │       └── tweet-video-2100475914182107353.json   Tweet real usado como fixture
@@ -514,7 +537,7 @@ segundos por combinación de imagen + resolución + formato.
 | `storage` | Guardar las preferencias (`chrome.storage.sync`, respaldo local y de sesión). |
 | `activeTab` | Inyectar los content scripts bajo demanda si la pestaña ya estaba abierta. |
 | `scripting` | Reinyectar `content.js`/`images.js`/`styles.css` en pestañas de X abiertas antes de instalar. |
-| `host_permissions` | `*://*.x.com/*`, `*://*.twitter.com/*` y `*://pbs.twimg.com/*` (este último solo para comprobar la disponibilidad de la resolución pedida). |
+| `host_permissions` | X (`x.com`, `twitter.com`, `pbs.twimg.com`), Instagram (`instagram.com`, `cdninstagram.com`) y Facebook (`facebook.com`, `fb.watch`). `fbcdn.net` lo comparten IG y FB. |
 
 - **No** se recopila, envía ni analiza ningún dato. No hay servidores propios ni telemetría.
 - **No** se solicitan permisos amplios (`<all_urls>`, `webRequest`, `tabs`, `cookies`…).

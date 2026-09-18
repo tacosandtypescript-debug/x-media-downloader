@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Descargador de medios para X",
-  "version": "2.4.0",
-  "description": "Añade un botón flotante \"Descargar\" sobre los videos e imágenes de X (Twitter) para guardarlos en la máxima calidad disponible y en el formato que elijas.",
+  "version": "2.5.0",
+  "description": "Añade un botón flotante \"Descargar\" sobre los videos e imágenes de X (Twitter), Instagram y Facebook para guardarlos en la máxima calidad, con opción de solo audio (M4A/MP3).",
   "minimum_chrome_version": "116",
   "icons": {
     "16": "icons/icon16.png",
@@ -34,39 +34,18 @@
     "*://pbs.twimg.com/*",
     "*://*.instagram.com/*",
     "*://*.cdninstagram.com/*",
+    "*://*.facebook.com/*",
+    "*://*.fb.watch/*",
     "*://*.fbcdn.net/*"
   ],
   "content_scripts": [
     {
       "matches": [
         "*://*.x.com/*",
-        "*://*.twitter.com/*"
-      ],
-      "js": [
-        "page-bridge.js"
-      ],
-      "world": "MAIN",
-      "run_at": "document_start",
-      "all_frames": false
-    },
-    {
-      "matches": [
-        "*://*.instagram.com/*"
-      ],
-      "js": [
-        "content.js",
-        "images.js",
-        "instagram.js"
-      ],
-      "css": [
-        "styles.css"
-      ],
-      "run_at": "document_idle",
-      "all_frames": false
-    },
-    {
-      "matches": [
-        "*://*.instagram.com/*"
+        "*://*.twitter.com/*",
+        "*://*.instagram.com/*",
+        "*://*.facebook.com/*",
+        "*://*.fb.watch/*"
       ],
       "js": [
         "page-bridge.js"
@@ -78,12 +57,16 @@
     {
       "matches": [
         "*://*.x.com/*",
-        "*://*.twitter.com/*"
+        "*://*.twitter.com/*",
+        "*://*.instagram.com/*",
+        "*://*.facebook.com/*",
+        "*://*.fb.watch/*"
       ],
       "js": [
         "content.js",
         "images.js",
-        "instagram.js"
+        "instagram.js",
+        "facebook.js"
       ],
       "css": [
         "styles.css"

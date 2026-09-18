@@ -1022,6 +1022,109 @@ test('hostPermitido acepta subdominios del CDN y rechaza el resto', () => {
   assert.strictEqual(igBridge.api.hostPermitido('example.com'), false);
 });
 
+/* ------------------------------------------------------------- facebook -- */
+
+console.log('\nFacebook (extractor del puente)');
+
+const FB_URL_HD = 'https://video.fymq2-1.fna.fbcdn.net/o1/v/t2/f2/m412/HD.mp4?_nc_cat=104&oh=00_AQK92&oe=6AB2B76E&bitrate=1414536&tag=sve_hd';
+const FB_URL_SD = 'https://video.fymq2-1.fna.fbcdn.net/o1/v/t2/f2/m412/SD.mp4?_nc_cat=104&oh=00_AQK92&oe=6AB2B76E&bitrate=414536&tag=sve_sd';
+const FB_TROZO = 'https://video.fymq2-1.fna.fbcdn.net/o1/v/t2/f2/m412/trozo.mp4?bytestart=0&byteend=12345';
+
+// MPD real de Facebook: audio y vídeo SEPARADOS, un archivo por representación.
+const FB_MPD = [
+  '<?xml version="1.0" encoding="UTF-8"?>',
+  '<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT7.0S">',
+  '  <Period>',
+  '    <AdaptationSet mimeType="audio/mp4" lang="und">',
+  '      <Representation id="audio-1" bandwidth="64000" codecs="mp4a.40.2">',
+  '        <BaseURL>https://video.fymq2-1.fna.fbcdn.net/o1/v/t2/f2/m412/audio.mp4?oh=00_AUDIO&oe=6AB2B76E</BaseURL>',
+  '        <SegmentBase indexRange="0-1000"><Initialization range="0-800"/></SegmentBase>',
+  '      </Representation>',
+  '    </AdaptationSet>',
+  '    <AdaptationSet mimeType="video/mp4">',
+  '      <Representation id="video-1" bandwidth="1414536" width="576" height="1024" codecs="avc1.64001f">',
+  '        <BaseURL>https://video.fymq2-1.fna.fbcdn.net/o1/v/t2/f2/m412/video-1024.mp4?oh=00_VIDEO&oe=6AB2B76E</BaseURL>',
+  '      </Representation>',
+  '    </AdaptationSet>',
+  '  </Period>',
+  '</MPD>'
+].join('\n');
+
+const VIDEO_FB = {
+  videoId: '1906283450061603',
+  playable_url: FB_URL_SD,
+  playable_url_quality_hd: FB_URL_HD,
+  playable_duration_in_ms: 7000,
+  width: 576,
+  height: 1024,
+  video_dash_manifest: FB_MPD,
+  preferred_thumbnail: { image: { uri: 'https://scontent.fyhu2-1.fna.fbcdn.net/v/t15.5256-10/portada.jpg?oh=00_IMG&oe=6AB2C3E1', width: 576, height: 1024 } },
+  owner: { name: 'Alejandro Garcia' }
+};
+
+const FOTO_FB = {
+  id: '1234567890',
+  image: { uri: 'https://scontent.fyhu2-1.fna.fbcdn.net/v/t39.30808-6/foto-grande.jpg?oh=00_FOTO&oe=6AB2C3E1', width: 2048, height: 1536 },
+  owner: { name: 'Alejandro Garcia' }
+};
+
+const fbBridge = loadBridge({});
+
+test('reconoce un objeto de vídeo de Facebook', () => {
+  assert.strictEqual(fbBridge.api.pareceVideoDeFacebook(VIDEO_FB), true);
+  assert.strictEqual(fbBridge.api.pareceVideoDeFacebook({ playable_url: FB_URL_SD }), true);
+  assert.strictEqual(fbBridge.api.pareceVideoDeFacebook({ hola: 1 }), false);
+  assert.strictEqual(fbBridge.api.pareceVideoDeFacebook(null), false);
+});
+
+test('reconoce una foto de Facebook (y no la confunde con vídeo)', () => {
+  assert.strictEqual(fbBridge.api.pareceFotoDeFacebook(FOTO_FB), true);
+  assert.strictEqual(fbBridge.api.pareceFotoDeFacebook(VIDEO_FB), false);
+  assert.strictEqual(fbBridge.api.pareceFotoDeFacebook({ image: { uri: 'https://evil.example.com/x.jpg' } }), false);
+});
+
+test('el vídeo prefiere la pista HD y descarta los trozos del DASH', () => {
+  const media = fbBridge.api.normalizarVideoFacebook(VIDEO_FB);
+  assert.strictEqual(media.tipo, 'video');
+  assert.strictEqual(media.id, '1906283450061603');
+  assert.ok(media.candidatos[0].url.includes('HD.mp4'), media.candidatos[0].url);
+  assert.strictEqual(media.candidatos[0].etiqueta, 'hd');
+  assert.strictEqual(media.candidatos.length, 2, 'solo HD y SD, no los trozos');
+
+  const conTrozo = fbBridge.api.normalizarVideoFacebook({ playable_url: FB_TROZO });
+  assert.ok(!conTrozo || !conTrozo.candidatos.some((c) => c.url.includes('bytestart')), 'nunca un trozo');
+});
+
+test('la foto se queda con la URL de mayor resolución', () => {
+  const media = fbBridge.api.normalizarFotoFacebook(FOTO_FB);
+  assert.strictEqual(media.tipo, 'imagen');
+  assert.ok(media.candidatos[0].url.includes('foto-grande.jpg'));
+  assert.strictEqual(media.ancho, 2048);
+});
+
+test('el manifiesto DASH de Facebook se conserva para sacar el audio', () => {
+  const media = fbBridge.api.normalizarVideoFacebook(VIDEO_FB);
+  assert.ok(media.mpd.includes('<MPD'), 'debe llevarse el MPD');
+  assert.ok(media.candidatos.every((c) => !c.url.includes('audio.mp4')), 'el audio del DASH no es candidato de vídeo');
+});
+
+test('el saneado de Facebook filtra hosts y respeta las firmas', () => {
+  const sucio = {
+    tipo: 'video',
+    id: '1',
+    candidatos: [
+      { url: FB_URL_HD, etiqueta: 'hd', ancho: 576, alto: 1024 },
+      { url: 'https://evil.example.com/malo.mp4', etiqueta: 'hd', ancho: 4000, alto: 4000 },
+      { url: 'http://video.fbcdn.net/inseguro.mp4', etiqueta: 'sd' }
+    ],
+    mpd: ''
+  };
+  const limpio = fbBridge.api.sanitizeFacebook(sucio);
+  assert.strictEqual(limpio.candidatos.length, 1);
+  assert.ok(limpio.candidatos[0].url.includes('oh=00_AQK92'), 'la firma se conserva entera');
+  assert.strictEqual(fbBridge.api.sanitizeFacebook({ candidatos: [{ url: 'https://evil.example.com/x.mp4' }] }), null);
+});
+
 /* ------------------------------------------------------------------ cierre -- */
 
 console.log('\n' + passed + ' pruebas correctas, ' + failures.length + ' fallos\n');

@@ -39,7 +39,7 @@
   const TOASTS_ID = 'xvd-toasts';
 
   /** Versión del núcleo (se muestra en el diagnóstico del popup). */
-  const coreVersion = '2.4.0';
+  const coreVersion = '2.5.0';
 
   const DEFAULT_SETTINGS = {
     /* --- General --- */
@@ -67,7 +67,9 @@
     imageFilenameTemplate: 'tweet_{id}_img{indice}', // plantilla del nombre de imagen
     /* --- Otros sitios --- */
     instagramEnabled: true,        // botones también en Instagram
-    instagramFilenameTemplate: 'instagram_{usuario}_{id}_{indice}'
+    instagramFilenameTemplate: 'instagram_{usuario}_{id}_{indice}',
+    facebookEnabled: true,         // botones también en Facebook
+    facebookFilenameTemplate: 'facebook_{usuario}_{id}_{indice}'
   };
 
   const QUALITY_ORDER = [2160, 1440, 1080, 720, 480, 360];
@@ -303,6 +305,12 @@
   /** Pide al puente los medios de una publicación de Instagram (por su código). */
   async function requestInstagramMedia(code, timeoutMs) {
     const respuesta = await pedirAlPuente({ sitio: 'instagram', code }, timeoutMs);
+    return respuesta && Array.isArray(respuesta.medios) ? respuesta.medios : [];
+  }
+
+  /** Pide al puente los medios de un vídeo o foto de Facebook (por su id). */
+  async function requestFacebookMedia(objetivo, timeoutMs) {
+    const respuesta = await pedirAlPuente({ sitio: 'facebook', objetivo: objetivo || '' }, timeoutMs);
     return respuesta && Array.isArray(respuesta.medios) ? respuesta.medios : [];
   }
 
@@ -2221,6 +2229,7 @@
     // Compartido con los módulos de otros sitios (instagram.js, facebook.js…)
     pedirAlPuente,
     requestInstagramMedia,
+    requestFacebookMedia,
     fetchBytes,
     convertirMp3,
     guardarBytes: enviarBytesAGuardar,

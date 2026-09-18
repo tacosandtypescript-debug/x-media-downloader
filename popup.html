@@ -269,6 +269,31 @@
               <small>Botones sobre las fotos, los carruseles y los reels de instagram.com.</small>
             </span>
           </label>
+          <label class="xvd-option xvd-option--check">
+            <input type="checkbox" id="facebookEnabled" />
+            <span>
+              <strong>Facebook</strong>
+              <small>Botones sobre los vídeos, los reels y las fotos de facebook.com.</small>
+            </span>
+          </label>
+          <label class="xvd-field" for="facebookFilenameTemplate">
+            <span class="xvd-field__label">Plantilla del nombre en Facebook</span>
+            <input
+              type="text"
+              id="facebookFilenameTemplate"
+              placeholder="facebook_{usuario}_{id}_{indice}"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <small class="xvd-field__help">
+              Variables: <code>{usuario}</code> <code>{id}</code> <code>{fecha}</code> <code>{indice}</code>
+              <code>{calidad}</code> <code>{ext}</code>
+            </small>
+          </label>
+          <p class="xvd-hint">
+            En Facebook el vídeo con audio se sirve hasta 720p; para más resolución habría que unir las
+            pistas separadas del DASH. El <strong>M4A aquí sí es la pista original</strong> (sin recomprimir).
+          </p>
           <label class="xvd-field" for="instagramFilenameTemplate">
             <span class="xvd-field__label">Plantilla del nombre en Instagram</span>
             <input

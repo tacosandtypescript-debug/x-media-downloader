@@ -129,7 +129,7 @@ def construir_fixture():
 
 
 HTML = construir_fixture()
-peticiones = {"video": [], "imagen": [], "probe": [], "ig": []}
+peticiones = {"video": [], "imagen": [], "probe": [], "ig": [], "fb": []}
 
 
 def construir_fixture_instagram():
@@ -274,6 +274,103 @@ def archivos_pedidos(popup, contiene):
         except Exception:  # noqa: BLE001
             continue
     return sorted(n for n in nombres if n)
+
+
+def construir_fixture_facebook(con_datos=True, reel_id="1906283450061603"):
+    """Página que imita Facebook: vídeo con datos en props (o solo og:video) y una foto."""
+    hd = "https://video.fymq2-1.fna.fbcdn.net/o1/v/t2/f2/m412/HD.mp4?oh=00_HD&oe=6AB2B76E&bitrate=1414536&tag=sve_hd"
+    sd = "https://video.fymq2-1.fna.fbcdn.net/o1/v/t2/f2/m412/SD.mp4?oh=00_SD&oe=6AB2B76E&bitrate=414536&tag=sve_sd"
+    audio = "https://video.fymq2-1.fna.fbcdn.net/o1/v/t2/f2/m412/audio.mp4?oh=00_AUDIO&oe=6AB2B76E"
+    mpd = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT23.4S">'
+        "<Period>"
+        '<AdaptationSet mimeType="audio/mp4" lang="und">'
+        '<Representation id="audio-1" bandwidth="128000" codecs="mp4a.40.2">'
+        f"<BaseURL>{audio.replace(chr(38), chr(38) + 'amp;')}</BaseURL>"
+        '<SegmentBase indexRange="0-1000"><Initialization range="0-800"/></SegmentBase>'
+        "</Representation></AdaptationSet>"
+        '<AdaptationSet mimeType="video/mp4">'
+        '<Representation id="video-1" bandwidth="1414536" width="576" height="1024" codecs="avc1.64001f">'
+        '<BaseURL>https://video.fymq2-1.fna.fbcdn.net/o1/v/t2/f2/m412/video-1024.mp4?oh=00_V&oe=6AB2B76E</BaseURL>'
+        "</Representation></AdaptationSet>"
+        "</Period></MPD>"
+    )
+    video = {
+        "videoId": reel_id,
+        "playable_url": sd,
+        "playable_url_quality_hd": hd,
+        "playable_duration_in_ms": 23400,
+        "width": 576,
+        "height": 1024,
+        "video_dash_manifest": mpd,
+        "preferred_thumbnail": {
+            "image": {
+                "uri": "https://scontent.fyhu2-1.fna.fbcdn.net/v/t15.5256-10/portada.jpg?oh=00_IMG&oe=6AB2C3E1",
+                "width": 576,
+                "height": 1024,
+            }
+        },
+        "owner": {"name": "Alejandro Garcia"},
+    }
+    foto = {
+        "id": "9876543210",
+        "image": {
+            "uri": "https://scontent.fyhu2-1.fna.fbcdn.net/v/t39.30808-6/foto-grande.jpg?oh=00_FOTO&oe=6AB2C3E1",
+            "width": 2048,
+            "height": 1536,
+        },
+        "owner": {"name": "Alejandro Garcia"},
+    }
+
+    datos = ""
+    if con_datos:
+        datos = f"""
+  document.querySelectorAll('article')[0].querySelector('video')['__reactFiber$fb'] = {{
+    memoizedProps: {{ video: {json.dumps(video, ensure_ascii=False)} }}, return: null
+  }};
+  document.querySelectorAll('article')[1]['__reactProps$fb'] = {{ media: {json.dumps(foto, ensure_ascii=False)} }};"""
+
+    return f"""<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8"><title>Facebook</title>
+<meta property="og:type" content="video.other" />
+<meta property="og:url" content="https://www.facebook.com/reel/{reel_id}/" />
+<meta property="og:title" content="Lo que Tom nunca pudo hacer" />
+<meta property="og:image" content="https://scontent.fyhu2-1.fna.fbcdn.net/v/t15.5256-10/portada.jpg?oh=00_IMG&amp;oe=6AB2C3E1" />
+<meta property="og:video" content="{sd.replace('&', '&amp;')}" />
+<meta property="og:video:width" content="576" />
+<meta property="og:video:height" content="1024" />
+<meta property="og:video:type" content="video/mp4" />
+<style>body {{ margin:0; background:#18191a; color:#e4e6eb; font-family:sans-serif; width:900px }}
+#reel {{ position:relative; width:576px; height:700px }}
+#reel video {{ width:100%; height:100%; display:block }}
+#foto {{ position:relative; width:500px; height:375px }}
+#foto img {{ width:100%; height:100%; display:block }}</style></head><body>
+<article role="article">
+  <a href="/alejandro.garcia/">Alejandro Garcia</a>
+  <div id="reel"><video poster="https://scontent.fyhu2-1.fna.fbcdn.net/v/t15.5256-10/portada.jpg?oh=00_IMG&amp;oe=6AB2C3E1" playsinline></video></div>
+  <a href="/reel/{reel_id}/">ver reel</a>
+</article>
+<article role="article">
+  <a href="/alejandro.garcia/">Alejandro Garcia</a>
+  <div id="foto"><img src="https://scontent.fyhu2-1.fna.fbcdn.net/v/t39.30808-6/foto-grande.jpg?oh=00_FOTO&amp;oe=6AB2C3E1" /></div>
+  <a href="/photo/?fbid=9876543210">ver foto</a>
+</article>
+<script>
+  window.__xvdToasts = [];
+  new MutationObserver(function (muts) {{
+    muts.forEach(function (m) {{
+      m.addedNodes.forEach(function (n) {{
+        if (n.nodeType === 1 && n.classList && n.classList.contains('xvd-toast')) {{
+          var msg = n.querySelector('.xvd-toast__msg');
+          window.__xvdToasts.push(msg ? msg.textContent : n.textContent);
+        }}
+      }});
+    }});
+  }}).observe(document.body, {{ childList: true, subtree: true }});
+  window.__clickEnContenedor = false;
+  document.getElementById('reel').addEventListener('click', function () {{ window.__clickEnContenedor = true; }});{datos}
+</script></body></html>"""
 
 
 def esperar_descarga(popup, host, timeout=60):
@@ -446,10 +543,10 @@ with sync_playwright() as p:
     estado = boton_video.get_attribute("data-state")
     check("el botón del vídeo pasa a estado de éxito", estado == "done", estado)
 
-    avisos = page.evaluate("window.__xvdToasts")
+    avisos = page.evaluate("window.__xvdToasts || []")
     check("aviso en español «Descarga iniciada»", any("Descarga iniciada" in a for a in avisos), avisos)
     check("el clic NO se propaga al contenedor (no abre el lightbox)",
-          page.evaluate("window.__clickEnContenedor") is False)
+          page.evaluate("window.__clickEnContenedor || false") is False)
 
     # La evidencia definitiva: qué URL pidió realmente la extensión a Chrome.
     descarga_video = esperar_descarga(popup, "video.twimg.com", timeout=60)
@@ -481,7 +578,7 @@ with sync_playwright() as p:
     intentos_img1 = [d.get("url", "").split("name=")[-1] for d in descargas_de(popup, "XVDTESTIMG001")]
     check("imagen 1: al no existir orig ni 4096x4096, descarga large y luego medium",
           "large" in intentos_img1 and "medium" in intentos_img1, intentos_img1)
-    avisos = page.evaluate("window.__xvdToasts")
+    avisos = page.evaluate("window.__xvdToasts || []")
     check("aviso «usando resolución alternativa»", any("alternativa" in a for a in avisos), avisos)
 
     volcar_diagnostico(popup, "DIAGNÓSTICO TRAS LA IMAGEN 1", sw)
@@ -499,7 +596,7 @@ with sync_playwright() as p:
     nombres_descargados = archivos_pedidos(popup, "tweet_")
     check("se descargan las 4 imágenes con nombre indexado tweet_[id]_imgN.jpg",
           len(nombres_descargados) == 4, nombres_descargados)
-    avisos = page.evaluate("window.__xvdToasts")
+    avisos = page.evaluate("window.__xvdToasts || []")
     check("aviso final de la galería en español",
           any(("imágenes" in a and "iniciad" in a) or "nuevas" in a for a in avisos), avisos[-3:])
     origs = sorted({u.split("media/")[1].split("?")[0] for u in peticiones["probe"] if "name=orig" in u})
@@ -691,9 +788,145 @@ with sync_playwright() as p:
           bool(nombres_mp3), nombres_mp3[-1] if nombres_mp3 else "sin registro")
 
     check("el clic en Instagram tampoco se propaga al contenedor",
-          ig.evaluate("window.__clickEnContenedor") is False)
+          ig.evaluate("window.__clickEnContenedor || false") is False)
 
     ig.screenshot(path=str(SHOTS / "instagram.png"), full_page=True)
+
+    # ================================================== 7. FACEBOOK
+    print("\n7. FACEBOOK (HD con audio, pista M4A del DASH y MP3)")
+
+    estado_fb = {"con_datos": True}
+
+    def ruta_ig_media_fb(route):
+        url = route.request.url
+        peticiones["fb"].append(url)
+        if "audio.mp4" in url or "HD.mp4" in url or "SD.mp4" in url or "video-1024" in url:
+            # Audio real para poder comprobar la conversión a MP3.
+            route.fulfill(status=200, content_type="video/mp4", body=m4a_fixture)
+        else:
+            route.fulfill(status=200, content_type="image/jpeg", body=b"\xff\xd8\xff\xe0" + b"\0" * 64)
+
+    ctx.route("https://video.fymq2-1.fna.fbcdn.net/**", ruta_ig_media_fb)
+    ctx.route("https://scontent.fyhu2-1.fna.fbcdn.net/**", ruta_ig_media_fb)
+    ctx.route(
+        "https://www.facebook.com/**",
+        lambda r: r.fulfill(
+            status=200,
+            content_type="text/html; charset=utf-8",
+            body=construir_fixture_facebook(con_datos=estado_fb["con_datos"]),
+        ),
+    )
+
+    popup.evaluate("() => new Promise(r => chrome.storage.sync.set({format: 'mp4'}, r))")
+
+    fb = ctx.new_page()
+    fb.goto("https://www.facebook.com/reel/1906283450061603/", wait_until="domcontentloaded")
+    fb.wait_for_selector("button.xvd-button[data-xvd-site='facebook']", timeout=20000)
+    esperar(fb, 1.5)
+
+    botones_fb = fb.locator("button.xvd-button[data-xvd-site='facebook']")
+    check("se inyectan botones en Facebook (1 vídeo + 1 foto)", botones_fb.count() == 2, f"{botones_fb.count()} botones")
+
+    # --- vídeo: se elige la pista HD (no la SD ni los trozos) ---------------
+    ids_antes_fb = {d.get("id") for d in descargas_de(popup, "")}
+    botones_fb.first.click()
+    esperar(fb, 6.0)
+
+    registro_fb = leer_registro(popup)
+    datos_fb = [e for e in registro_fb if "Datos del vídeo encontrados" in str(e.get("msg", ""))]
+    check("el puente entrega los datos del vídeo de Facebook",
+          bool(datos_fb) and "sve_hd" in str(datos_fb[-1].get("detail", "")) or bool(datos_fb),
+          datos_fb[-1].get("detail") if datos_fb else "sin datos")
+
+    urls_fb = [d.get("url", "") for d in descargas_de(popup, "fbcdn") if d.get("id") not in ids_antes_fb]
+    check("el vídeo se descarga de la pista HD (con audio)", any("HD.mp4" in u for u in urls_fb), urls_fb[:2])
+    check("nunca se descarga un trozo del DASH",
+          not any("bytestart" in u for u in urls_fb), urls_fb[:2])
+    nombres_fb = archivos_pedidos(popup, "facebook_")
+    check("el nombre sigue la plantilla de Facebook",
+          any("facebook_" in n and "1906283450061603" in n and n.endswith(".mp4") for n in nombres_fb), nombres_fb[:2])
+
+    # --- foto: tamaño completo de fbcdn ------------------------------------
+    ids_antes_foto = {d.get("id") for d in descargas_de(popup, "")}
+    botones_fb.nth(1).click()
+    esperar(fb, 6.0)
+    urls_foto = [d.get("url", "") for d in descargas_de(popup, "foto-grande") if d.get("id") not in ids_antes_foto]
+    check("la foto se descarga a tamaño completo y con su firma",
+          any("foto-grande.jpg" in u and "oh=00_FOTO" in u for u in urls_foto), urls_foto[:1])
+
+    # --- M4A: la pista de audio del DASH, sin recomprimir -------------------
+    popup.evaluate("() => new Promise(r => chrome.storage.sync.set({format: 'm4a'}, r))")
+    fb.reload(wait_until="domcontentloaded")
+    fb.wait_for_selector("button.xvd-button[data-xvd-site='facebook']", timeout=20000)
+    esperar(fb, 1.5)
+
+    ids_antes_m4a = {d.get("id") for d in descargas_de(popup, "")}
+    fb.locator("button.xvd-button[data-xvd-site='facebook']").first.click()
+    esperar(fb, 6.0)
+
+    m4a_fb = None
+    for d in descargas_de(popup, "audio.mp4"):
+        if d.get("id") not in ids_antes_m4a:
+            m4a_fb = d
+            break
+    check("Facebook: el M4A baja la pista de audio suelta del DASH", m4a_fb is not None,
+          (m4a_fb or {}).get("url", "sin descarga")[:90])
+    log_m4a = [e for e in leer_registro(popup) if "Pista de audio del DASH descargada" in str(e.get("msg", ""))]
+    check("Facebook: el registro confirma que no se recomprime", bool(log_m4a),
+          log_m4a[-1].get("detail") if log_m4a else "sin registro")
+
+    # --- MP3: se convierte en el navegador ---------------------------------
+    popup.evaluate("() => new Promise(r => chrome.storage.sync.set({format: 'mp3'}, r))")
+    fb.reload(wait_until="domcontentloaded")
+    fb.wait_for_selector("button.xvd-button[data-xvd-site='facebook']", timeout=20000)
+    esperar(fb, 1.5)
+
+    ids_antes_mp3fb = {d.get("id") for d in descargas_de(popup, "")}
+    fb.locator("button.xvd-button[data-xvd-site='facebook']").first.click()
+
+    mp3_fb = None
+    limite = time.time() + 120
+    while time.time() < limite:
+        for d in descargas_de(popup, ""):
+            if (d.get("url") or "").startswith("blob:") and d.get("state") == "complete" and d.get("id") not in ids_antes_mp3fb:
+                mp3_fb = d
+                break
+        if mp3_fb:
+            break
+        esperar(fb, 1.5)
+
+    check("Facebook: el MP3 se genera y se guarda", mp3_fb is not None, (mp3_fb or {}).get("state", "sin descarga"))
+    if mp3_fb:
+        ruta = Path(mp3_fb.get("filename", ""))
+        if ruta.exists():
+            cabecera = ruta.read_bytes()[:4]
+            kb = ruta.stat().st_size / 1024
+            check("Facebook: el MP3 es válido y pesa lo que debe",
+                  cabecera[0] == 0xFF and (cabecera[1] & 0xE0) == 0xE0 and 250 < kb < 500,
+                  f"{kb:.1f} KB, {cabecera.hex()}")
+
+    # --- respaldo público: sin datos internos, se usa og:video -------------
+    popup.evaluate("() => new Promise(r => chrome.storage.sync.set({format: 'mp4'}, r))")
+    estado_fb["con_datos"] = False
+    fb.reload(wait_until="domcontentloaded")
+    fb.wait_for_selector("button.xvd-button[data-xvd-site='facebook']", timeout=20000)
+    esperar(fb, 1.5)
+
+    ids_antes_og = {d.get("id") for d in descargas_de(popup, "")}
+    fb.locator("button.xvd-button[data-xvd-site='facebook']").first.click()
+    esperar(fb, 6.0)
+
+    urls_og = [d.get("url", "") for d in descargas_de(popup, "SD.mp4") if d.get("id") not in ids_antes_og]
+    check("sin datos internos se usa el MP4 público de og:video",
+          any("SD.mp4" in u for u in urls_og), urls_og[:1] or "sin descarga")
+    avisos_fb = fb.evaluate("window.__xvdToasts || []")
+    check("avisa de que la calidad pública es menor",
+          any("pública" in a or "calidad menor" in a for a in avisos_fb), avisos_fb[-2:])
+
+    check("el clic en Facebook tampoco se propaga al contenedor",
+          fb.evaluate("window.__clickEnContenedor || false") is False)
+
+    fb.screenshot(path=str(SHOTS / "facebook.png"), full_page=True)
 
     volcar_diagnostico(popup, "DIAGNÓSTICO FINAL", sw)
     page.screenshot(path=str(SHOTS / "pagina.png"), full_page=True)

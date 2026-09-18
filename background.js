@@ -93,7 +93,9 @@ const DEFAULT_SETTINGS = {
   imageFilenameTemplate: 'tweet_{id}_img{indice}',
   /* --- Otros sitios --- */
   instagramEnabled: true,
-  instagramFilenameTemplate: 'instagram_{usuario}_{id}_{indice}'
+  instagramFilenameTemplate: 'instagram_{usuario}_{id}_{indice}',
+  facebookEnabled: true,
+  facebookFilenameTemplate: 'facebook_{usuario}_{id}_{indice}'
 };
 
 /** downloadId -> { tabId, filename, url }. Caché en memoria + respaldo en sesión. */

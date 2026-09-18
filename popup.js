@@ -35,7 +35,9 @@ const DEFAULT_SETTINGS = {
   imageFilenameTemplate: 'tweet_{id}_img{indice}',
   /* --- Otros sitios --- */
   instagramEnabled: true,
-  instagramFilenameTemplate: 'instagram_{usuario}_{id}_{indice}'
+  instagramFilenameTemplate: 'instagram_{usuario}_{id}_{indice}',
+  facebookEnabled: true,
+  facebookFilenameTemplate: 'facebook_{usuario}_{id}_{indice}'
 };
 
 const FORMAT_HINTS = {
@@ -215,6 +217,10 @@ function readForm() {
     imageVerify: elements.imageVerify.checked,
     imageFilenameTemplate: elements.imageFilenameTemplate.value.trim() || DEFAULT_SETTINGS.imageFilenameTemplate,
 
+    facebookEnabled: elements.facebookEnabled.checked,
+    facebookFilenameTemplate:
+      elements.facebookFilenameTemplate.value.trim() || DEFAULT_SETTINGS.facebookFilenameTemplate,
+
     instagramEnabled: elements.instagramEnabled.checked,
     instagramFilenameTemplate:
       elements.instagramFilenameTemplate.value.trim() || DEFAULT_SETTINGS.instagramFilenameTemplate
@@ -244,6 +250,9 @@ function fillForm(settings) {
   elements.imageFallback.checked = !!settings.imageFallback;
   elements.imageVerify.checked = !!settings.imageVerify;
   elements.imageFilenameTemplate.value = settings.imageFilenameTemplate || DEFAULT_SETTINGS.imageFilenameTemplate;
+  elements.facebookEnabled.checked = !!settings.facebookEnabled;
+  elements.facebookFilenameTemplate.value =
+    settings.facebookFilenameTemplate || DEFAULT_SETTINGS.facebookFilenameTemplate;
   elements.instagramEnabled.checked = !!settings.instagramEnabled;
   elements.instagramFilenameTemplate.value =
     settings.instagramFilenameTemplate || DEFAULT_SETTINGS.instagramFilenameTemplate;
@@ -488,6 +497,8 @@ async function init() {
   elements.diagSummary = $('diagSummary');
   elements.updateInfo = $('updateInfo');
   elements.instagramEnabled = $('instagramEnabled');
+  elements.facebookEnabled = $('facebookEnabled');
+  elements.facebookFilenameTemplate = $('facebookFilenameTemplate');
   elements.instagramFilenameTemplate = $('instagramFilenameTemplate');
   elements.updateApply = $('updateApply');
 
@@ -508,7 +519,8 @@ async function init() {
     elements.folder,
     elements.filenameTemplate,
     elements.imageFilenameTemplate,
-    elements.instagramFilenameTemplate
+    elements.instagramFilenameTemplate,
+    elements.facebookFilenameTemplate
   ].forEach((input) => {
     input.addEventListener('input', save);
   });

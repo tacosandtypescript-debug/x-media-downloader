@@ -498,6 +498,256 @@
   }
 
   /* =======================================================================
+   * 2c. Facebook
+   *
+   * FB también es una SPA con React: los datos del reproductor viven en las
+   * props y son invisibles desde el mundo aislado. Formas reconocidas:
+   *   - Vídeo: playable_url_quality_hd / browser_native_hd_url (MP4 con audio),
+   *     playable_url / browser_native_sd_url (versión ligera) y
+   *     dash_manifest / video_dash_manifest (MPD con audio y vídeo SEPARADOS).
+   *   - Foto: image1 / image / photo_image / currMedia.image con un `uri`.
+   *
+   * Las URLs van firmadas (oh= / oe=) y CADUCAN: se devuelven tal cual.
+   * Se descartan las URLs con bytestart/byteend, que son trozos de un DASH.
+   * ===================================================================== */
+
+  function esUrlDeVideoFacebook(url) {
+    if (typeof url !== 'string' || !/^https:\/\//i.test(url)) return false;
+    if (/[?&](bytestart|byteend)=/i.test(url)) return false; // trozo, no archivo
+    return /\.mp4(\?|$)/i.test(url) || /video[^/]*\.fbcdn\.net/i.test(url);
+  }
+
+  function esUrlDeFotoFacebook(url) {
+    if (typeof url !== 'string' || !/^https:\/\//i.test(url)) return false;
+    return /(scontent|instagram)[^/]*\.(fbcdn\.net|cdninstagram\.com)/i.test(url);
+  }
+
+  function imagenDeFacebook(obj) {
+    for (const clave of ['preferred_thumbnail', 'thumbnailImage', 'image', 'image1', 'photo_image', 'viewer_image']) {
+      const valor = obj[clave];
+      if (!valor) continue;
+      if (typeof valor === 'string' && esUrlDeFotoFacebook(valor)) return { url: valor, width: 0, height: 0 };
+      if (typeof valor === 'object') {
+        if (valor.image && typeof valor.image.uri === 'string') {
+          return { url: valor.image.uri, width: valor.image.width, height: valor.image.height };
+        }
+        if (typeof valor.uri === 'string') return { url: valor.uri, width: valor.width, height: valor.height };
+        if (typeof valor.url === 'string') return { url: valor.url, width: valor.width, height: valor.height };
+      }
+    }
+    if (obj.currMedia && obj.currMedia.image && typeof obj.currMedia.image.uri === 'string') {
+      const img = obj.currMedia.image;
+      return { url: img.uri, width: img.width, height: img.height };
+    }
+    return null;
+  }
+
+  function pareceVideoDeFacebook(valor) {
+    if (!valor || typeof valor !== 'object') return false;
+    // Devuelve SIEMPRE booleano (una cadena no vacía es truthy pero no es true).
+    const tiene = (c) => typeof valor[c] === 'string' && valor[c] !== '';
+    return (
+      tiene('playable_url_quality_hd') ||
+      tiene('browser_native_hd_url') ||
+      tiene('playable_url') ||
+      tiene('browser_native_sd_url') ||
+      tiene('video_dash_manifest') ||
+      tiene('dash_manifest')
+    );
+  }
+
+  function pareceFotoDeFacebook(valor) {
+    if (!valor || typeof valor !== 'object') return false;
+    if (pareceVideoDeFacebook(valor)) return false;
+    const img = imagenDeFacebook(valor);
+    return !!img && esUrlDeFotoFacebook(img.url);
+  }
+
+  function normalizarVideoFacebook(obj) {
+    const candidatos = [];
+    const añadir = (url, etiqueta, ancho, alto, bitrate) => {
+      if (!esUrlDeVideoFacebook(url)) return;
+      if (candidatos.some((c) => c.url === url)) return;
+      candidatos.push({ url, etiqueta, ancho: Number(ancho) || 0, alto: Number(alto) || 0, bitrate: Number(bitrate) || 0 });
+    };
+
+    // Los nombres "hd" son MP4 con audio; los "sd" son la versión ligera.
+    añadir(obj.playable_url_quality_hd, 'hd', obj.width, obj.height, obj.playable_url_quality_hd_bitrate);
+    añadir(obj.browser_native_hd_url, 'hd', obj.width, obj.height);
+    añadir(obj.playable_url, 'sd', obj.width, obj.height);
+    añadir(obj.browser_native_sd_url, 'sd', obj.width, obj.height);
+
+    // El DASH trae audio y vídeo por separado.
+    const mpd = obj.video_dash_manifest || obj.dash_manifest || '';
+    const poster = imagenDeFacebook(obj);
+
+    if (!candidatos.length && !mpd) return null;
+
+    // Las variantes con más píxeles primero; a igualdad, las "hd".
+    candidatos.sort((a, b) => {
+      const area = (c) => (c.ancho || 0) * (c.alto || 0);
+      if (area(b) !== area(a)) return area(b) - area(a);
+      if (a.etiqueta !== b.etiqueta) return a.etiqueta === 'hd' ? -1 : 1;
+      return (b.bitrate || 0) - (a.bitrate || 0);
+    });
+
+    return {
+      tipo: 'video',
+      id: String(obj.videoId || obj.video_id || obj.id || ''),
+      usuario: String((obj.owner && (obj.owner.name || obj.owner.username)) || ''),
+      ancho: Number(obj.width) || (candidatos[0] && candidatos[0].ancho) || 0,
+      alto: Number(obj.height) || (candidatos[0] && candidatos[0].alto) || 0,
+      duracion: Number(obj.playable_duration_in_ms || obj.duration_in_ms || 0),
+      poster: poster ? poster.url : '',
+      candidatos,
+      // El MPD se analiza en el mundo aislado (facebook.js).
+      mpd: typeof mpd === 'string' && mpd.indexOf('<MPD') !== -1 ? mpd.slice(0, 200000) : ''
+    };
+  }
+
+  function normalizarFotoFacebook(obj) {
+    const img = imagenDeFacebook(obj);
+    if (!img || !esUrlDeFotoFacebook(img.url)) return null;
+    return {
+      tipo: 'imagen',
+      id: String(obj.id || obj.photo_id || obj.pk || ''),
+      usuario: String((obj.owner && (obj.owner.name || obj.owner.username)) || ''),
+      ancho: Number(img.width) || 0,
+      alto: Number(img.height) || 0,
+      poster: '',
+      candidatos: [{ url: img.url, etiqueta: 'original', ancho: Number(img.width) || 0, alto: Number(img.height) || 0 }],
+      mpd: ''
+    };
+  }
+
+  /** Búsqueda acotada por forma, con el predicado de Facebook. */
+  function deepCollectFacebook(root, out, limits) {
+    const maxDepth = (limits && limits.maxDepth) || 9;
+    const maxSteps = (limits && limits.maxSteps) || 8000;
+    const queue = [{ value: root, depth: 0 }];
+    const seen = new WeakSet();
+    let steps = 0;
+
+    while (queue.length && steps < maxSteps) {
+      const { value, depth } = queue.shift();
+      steps++;
+      if (!value || typeof value !== 'object' || depth > maxDepth) continue;
+      if (seen.has(value)) continue;
+      seen.add(value);
+
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          if (item && typeof item === 'object') queue.push({ value: item, depth: depth + 1 });
+        }
+        continue;
+      }
+
+      if (pareceVideoDeFacebook(value)) {
+        const media = normalizarVideoFacebook(value);
+        if (media) {
+          out.push(media);
+          continue;
+        }
+      }
+
+      if (pareceFotoDeFacebook(value)) {
+        const media = normalizarFotoFacebook(value);
+        if (media) {
+          out.push(media);
+          continue;
+        }
+      }
+
+      for (const key of Object.keys(value)) {
+        if (key === 'return' || key === 'child' || key === 'sibling' || key === '_owner') continue;
+        const hijo = value[key];
+        if (hijo && typeof hijo === 'object') queue.push({ value: hijo, depth: depth + 1 });
+      }
+    }
+    return out;
+  }
+
+  function dedupeFacebook(lista) {
+    const mapa = new Map();
+    for (const media of lista) {
+      if (!media || !media.candidatos.length) continue;
+      const clave = media.id || media.candidatos[0].url;
+      const previo = mapa.get(clave);
+      if (!previo || previo.candidatos.length < media.candidatos.length) mapa.set(clave, media);
+    }
+    return Array.from(mapa.values());
+  }
+
+  /** Devuelve los medios de Facebook de la página (o los del id pedido). */
+  function collectFacebook(objetivo) {
+    const encontrados = [];
+
+    const anclas = [];
+    try {
+      document.querySelectorAll('article, [role="article"], main, video, img').forEach((el) => {
+        if (anclas.length < 40) anclas.push(el);
+      });
+    } catch (_) {
+      /* sin DOM */
+    }
+
+    for (const el of anclas) {
+      const props = getReactProps(el);
+      if (props) deepCollectFacebook(props, encontrados, { maxDepth: 9, maxSteps: 6000 });
+
+      let fiber = getFiber(el);
+      let saltos = 0;
+      while (fiber && saltos < 30) {
+        if (fiber.memoizedProps) deepCollectFacebook(fiber.memoizedProps, encontrados, { maxDepth: 7, maxSteps: 3000 });
+        fiber = fiber.return;
+        saltos++;
+      }
+    }
+
+    for (const estado of [window.__INITIAL_STATE__, window.__RELAY_STORE__, window.require]) {
+      if (estado && typeof estado !== 'function') {
+        try {
+          deepCollectFacebook(estado, encontrados, { maxDepth: 10, maxSteps: 8000 });
+        } catch (_) {
+          /* estado no serializable */
+        }
+      }
+    }
+
+    const medios = dedupeFacebook(encontrados);
+    if (!objetivo) return medios;
+    const filtrados = medios.filter((m) => m.id === objetivo);
+    return filtrados.length ? filtrados : medios;
+  }
+
+  /** Saneado de los medios de Facebook. */
+  function sanitizeFacebook(media) {
+    if (!media || !Array.isArray(media.candidatos)) return null;
+    const candidatos = media.candidatos
+      .filter((c) => c && allowedUrl(c.url))
+      .slice(0, 12)
+      .map((c) => ({
+        url: c.url,
+        etiqueta: String(c.etiqueta || ''),
+        ancho: Number(c.ancho) || 0,
+        alto: Number(c.alto) || 0,
+        bitrate: Number(c.bitrate) || 0
+      }));
+    if (!candidatos.length) return null;
+    return {
+      tipo: media.tipo === 'imagen' ? 'imagen' : 'video',
+      id: String(media.id || ''),
+      usuario: String(media.usuario || ''),
+      ancho: Number(media.ancho) || 0,
+      alto: Number(media.alto) || 0,
+      duracion: Number(media.duracion) || 0,
+      poster: esUrlDeFotoFacebook(media.poster) ? media.poster : '',
+      candidatos,
+      mpd: typeof media.mpd === 'string' ? media.mpd : ''
+    };
+  }
+
+  /* =======================================================================
    * 3. Saneado de la respuesta (defensa frente a mensajes falsificados)
    * ===================================================================== */
 
@@ -588,6 +838,25 @@
       return;
     }
 
+    // --- Facebook --------------------------------------------------------
+    if (data.sitio === 'facebook') {
+      let medios = [];
+      try {
+        medios = collectFacebook(String(data.objetivo || ''))
+          .map(sanitizeFacebook)
+          .filter(Boolean)
+          .slice(0, MAX_MEDIA);
+      } catch (_) {
+        medios = [];
+      }
+      try {
+        window.postMessage({ [MARK]: true, kind: 'response', sitio: 'facebook', requestId, medios }, '*');
+      } catch (_) {
+        /* respuesta no clonable */
+      }
+      return;
+    }
+
     // --- X (Twitter) ------------------------------------------------------
     let payload = [];
     try {
@@ -628,7 +897,16 @@
       pareceMediaDeInstagram,
       normalizarMediaInstagram,
       sanitizeInstagram,
-      hostPermitido
+      hostPermitido,
+      // Facebook
+      pareceVideoDeFacebook,
+      pareceFotoDeFacebook,
+      normalizarVideoFacebook,
+      normalizarFotoFacebook,
+      deepCollectFacebook,
+      dedupeFacebook,
+      sanitizeFacebook,
+      imagenDeFacebook
     };
   }
 })();
