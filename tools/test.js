@@ -69,7 +69,18 @@ function loadContentScript() {
 }
 
 const xvd = loadContentScript();
-const { normalizeVariant, normalizeMediaEntity, extractMediaId, planDownload, bitrateDeAudio, buildFilename, sanitizeFolder, parseMasterPlaylist, parseMediaPlaylist } = xvd;
+const {
+  normalizeVariant,
+  normalizeMediaEntity,
+  extractMediaId,
+  planDownload,
+  bitrateDeAudio,
+  buildFilename,
+  buildTweetUrl,
+  sanitizeFolder,
+  parseMasterPlaylist,
+  parseMediaPlaylist
+} = xvd;
 
 /* --------------------------------------- carga del módulo de imágenes -- */
 
@@ -79,6 +90,7 @@ const IMAGE_DEFAULTS = {
   askWhereToSave: false,
   showToasts: true,
   showOnHover: false,
+  copyLinkButton: true,
   imagesEnabled: true,
   imageResolution: 'orig',
   imageFormat: 'auto',
@@ -141,6 +153,134 @@ function loadImagesModule(defaults) {
 const images = loadImagesModule(IMAGE_DEFAULTS);
 const img = images.api;
 
+/* ------------------------- botones de enlace en una galería de X -------- */
+
+function loadImagesUiModule() {
+  const registro = { botones: [], copiado: '' };
+  const children = (node) => node.children || (node.children = []);
+  const append = function (child) {
+    children(this).push(child);
+    child.parentElement = this;
+  };
+
+  const container = {
+    nodeType: 1,
+    parentElement: null,
+    children: [],
+    isConnected: true,
+    style: {},
+    matches: () => false,
+    closest: () => null,
+    querySelectorAll: (selector) => (selector.indexOf('tweetPhoto') >= 0 ? [cell1, cell2] : []),
+    appendChild: append,
+    setAttribute() {},
+    getAttribute: () => null,
+    getBoundingClientRect: () => ({ width: 640, height: 480 })
+  };
+
+  function makeImageCell(url) {
+    const image = {
+      nodeType: 1,
+      tagName: 'IMG',
+      currentSrc: url,
+      parentElement: null,
+      isConnected: true,
+      getAttribute: (name) => (name === 'src' ? url : null),
+      setAttribute() {},
+      getBoundingClientRect: () => ({ width: 320, height: 240 }),
+      closest: (selector) => (selector.indexOf('tweetPhoto') >= 0 ? cell : null)
+    };
+    const cell = {
+      nodeType: 1,
+      parentElement: container,
+      children: [image],
+      isConnected: true,
+      getAttribute: () => null,
+      setAttribute() {},
+      querySelector: () => image,
+      matches: () => false,
+      getBoundingClientRect: () => ({ width: 320, height: 240 }),
+      appendChild: append
+    };
+    image.parentElement = cell;
+    return { image, cell };
+  }
+
+  const first = makeImageCell('https://pbs.twimg.com/media/AAA.jpg?name=large');
+  const second = makeImageCell('https://pbs.twimg.com/media/BBB.jpg?name=large');
+  const cell1 = first.cell;
+  const cell2 = second.cell;
+
+  const core = {
+    BUTTON_CLASS: 'xvd-button',
+    BADGE_CLASS: 'xvd-badge',
+    HOST_ATTR: 'data-xvd-host',
+    IMAGE_ATTR: 'data-xvd-image',
+    ICONS: { download: '<svg></svg>', link: '<svg></svg>', images: '<svg></svg>' },
+    getSettings: () => ({ ...IMAGE_DEFAULTS, copyLinkButton: true }),
+    registerScanner: (fn) => (registro.scanner = fn),
+    registerDisableHook: () => {},
+    sanitizeFolder,
+    createButton: (options) => {
+      const button = {
+        dataset: {},
+        className: options.className || '',
+        isConnected: true,
+        parentElement: null,
+        children: [],
+        classList: { toggle: () => {} },
+        appendChild: append,
+        remove() {
+          this.isConnected = false;
+        }
+      };
+      registro.botones.push({ options, button });
+      return button;
+    },
+    setButtonState: () => {},
+    findOverlayHost: (node) => (node === container ? container : node.parentElement),
+    getTweetContext: () => ({ screenName: 'usuario', tweetId: '999', date: '2024-05-01' }),
+    buildTweetUrl: (ctx) => 'https://x.com/' + ctx.screenName + '/status/' + ctx.tweetId,
+    copyLinkToButton: async (button, url) => {
+      registro.copiado = typeof url === 'function' ? url() : url;
+      return true;
+    },
+    toast: () => {},
+    sleep: () => Promise.resolve(),
+    errorMessage: (error) => String(error && error.message ? error.message : error)
+  };
+
+  const sandbox = {
+    console,
+    setTimeout,
+    clearTimeout,
+    Promise,
+    URL,
+    location: { hostname: 'x.com', pathname: '/' },
+    document: {
+      querySelectorAll: (selector) => {
+        if (selector.indexOf('pbs.twimg.com') >= 0 || selector.indexOf('tweetPhoto') >= 0) return [cell1, cell2];
+        return [];
+      },
+      createElement: () => ({ className: '', textContent: '', style: {}, setAttribute() {}, appendChild: append })
+    },
+    getComputedStyle: () => ({ position: 'relative' }),
+    ResizeObserver: function ResizeObserver() {
+      this.observe = () => {};
+      this.disconnect = () => {};
+    },
+    module: { exports: {} }
+  };
+  sandbox.window = sandbox;
+  sandbox.globalThis = sandbox;
+  sandbox.window.__XVD_CORE__ = core;
+
+  const code = fs.readFileSync(path.join(ROOT, 'images.js'), 'utf8');
+  vm.createContext(sandbox);
+  vm.runInContext(code, sandbox, { filename: 'images-ui-test.js' });
+  return { registro, container, cells: [cell1, cell2] };
+}
+
 /* ------------------------------- carga del puente del mundo MAIN -- */
 
 /**
@@ -185,6 +325,62 @@ function loadBridge(options) {
   return { api: sandbox.module.exports, video, sandbox };
 }
 
+function loadPageModule(filename, options) {
+  const op = options || {};
+  const registro = { scanners: [], hooks: [] };
+  const core = {
+    BUTTON_CLASS: 'xvd-button',
+    BADGE_CLASS: 'xvd-badge',
+    HOST_ATTR: 'data-xvd-host',
+    IMAGE_ATTR: 'data-xvd-image',
+    ICONS: { download: '', link: '', images: '' },
+    getSettings: () => ({ enabled: true, instagramEnabled: true, facebookEnabled: true, copyLinkButton: true }),
+    registerScanner: (fn) => registro.scanners.push(fn),
+    registerDisableHook: (fn) => registro.hooks.push(fn),
+    findOverlayHost: () => null,
+    createButton: () => ({}),
+    setButtonState: () => {},
+    copyLinkToButton: async () => true,
+    getTweetContext: () => ({ screenName: 'usuario', tweetId: '1' }),
+    toast: () => {},
+    log: () => {},
+    errorMessage: (e) => String((e && e.message) || e),
+    sanitizeFolder: (v) => String(v || ''),
+    requestInstagramMedia: async () => [],
+    requestFacebookMedia: async () => [],
+    requestDownload: async () => ({ ok: true, downloadId: 1 }),
+    fetchBytes: async () => new Uint8Array(),
+    guardarBytes: async () => ({ ok: true }),
+    convertirMp3: async () => ({ bytes: new Uint8Array(), duracion: 0 })
+  };
+  const sandbox = {
+    console,
+    setTimeout,
+    clearTimeout,
+    Promise,
+    URL,
+    location: op.location,
+    document: {
+      querySelector: op.querySelector || (() => null),
+      querySelectorAll: op.querySelectorAll || (() => []),
+      createElement: () => ({ style: {}, dataset: {}, appendChild() {}, setAttribute() {} })
+    },
+    getComputedStyle: () => ({ position: 'static' }),
+    ResizeObserver: function ResizeObserver() {
+      this.observe = () => {};
+      this.disconnect = () => {};
+    },
+    module: { exports: {} }
+  };
+  sandbox.window = sandbox;
+  sandbox.globalThis = sandbox;
+  sandbox.window.__XVD_CORE__ = core;
+  const code = fs.readFileSync(path.join(ROOT, filename), 'utf8');
+  vm.createContext(sandbox);
+  vm.runInContext(code, sandbox, { filename });
+  return { api: sandbox.module.exports, registro };
+}
+
 /* ------------------------------------------------------------- mini runner -- */
 
 let passed = 0;
@@ -225,6 +421,54 @@ function test(name, fn) {
 function config(overrides) {
   return { ...xvd.DEFAULT_SETTINGS, ...overrides };
 }
+
+test('construye la URL canónica de una publicación de X', () => {
+  assert.strictEqual(buildTweetUrl({ screenName: 'usuario', tweetId: '123456789' }), 'https://x.com/usuario/status/123456789');
+  assert.strictEqual(buildTweetUrl({ screenName: 'usuario', tweetId: '' }), '');
+});
+
+test('una galería de X crea un solo botón «Copiar enlace» y copia la publicación', async () => {
+  const modulo = loadImagesUiModule();
+  modulo.registro.scanner();
+  const enlaces = modulo.registro.botones.filter((item) => item.options.label === 'Copiar enlace');
+  assert.strictEqual(enlaces.length, 1, 'la galería debe tener un solo botón de enlace');
+  assert.strictEqual(enlaces[0].options.icon, '<svg></svg>');
+  await enlaces[0].options.onClick({}, enlaces[0].button);
+  assert.strictEqual(modulo.registro.copiado, 'https://x.com/usuario/status/999');
+});
+
+test('Instagram construye el enlace del reel, no el del CDN', () => {
+  const article = {
+    querySelectorAll: () => [{ getAttribute: () => '/reel/DdXUcJaSe8X/' }]
+  };
+  const medio = { closest: () => article };
+  const modulo = loadPageModule('instagram.js', {
+    location: {
+      hostname: 'www.instagram.com',
+      pathname: '/reel/DdXUcJaSe8X/',
+      origin: 'https://www.instagram.com',
+      href: 'https://www.instagram.com/reel/DdXUcJaSe8X/'
+    }
+  });
+  assert.strictEqual(modulo.api.urlDePublicacion(medio), 'https://www.instagram.com/reel/DdXUcJaSe8X/');
+});
+
+test('Facebook conserva la URL canónica del post resuelta por la página', () => {
+  const meta = { getAttribute: () => 'https://www.facebook.com/reel/1906283450061603/' };
+  const modulo = loadPageModule('facebook.js', {
+    location: {
+      hostname: 'www.facebook.com',
+      pathname: '/reel/1906283450061603/',
+      origin: 'https://www.facebook.com',
+      href: 'https://www.facebook.com/reel/1906283450061603/'
+    },
+    querySelector: () => meta
+  });
+  assert.strictEqual(
+    modulo.api.urlDePublicacion({ closest: () => null }, { id: '1906283450061603' }),
+    'https://www.facebook.com/reel/1906283450061603/'
+  );
+});
 
 /* ------------------------------------------------------- variantes de X -- */
 
@@ -1900,6 +2144,13 @@ test('detecta la ficha abierta aunque la ruta lleve idioma', () => {
   }).api;
   assert.strictEqual(enEspanol.esLaFichaDe({ href: '/photos/bachalpsee-lake-mountains-7572681/' }), true);
   assert.strictEqual(enEspanol.esLaFichaDe({ href: '/photos/otra-cosa-999/' }), false);
+});
+
+test('Pixabay convierte el href de la ficha en un enlace de publicación', () => {
+  assert.strictEqual(
+    pix.urlDePublicacion({ href: '/photos/bachalpsee-lake-mountains-7572681/' }),
+    'https://pixabay.com/photos/bachalpsee-lake-mountains-7572681/'
+  );
 });
 
 test('el módulo solo se activa en pixabay.com', () => {

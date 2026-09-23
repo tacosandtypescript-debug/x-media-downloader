@@ -63,21 +63,25 @@
     return rect.width >= 150 && rect.height >= 150;
   }
 
-  /** Código corto (shortcode) de la publicación a la que pertenece un elemento. */
-  function codigoDePublicacion(elemento) {
+  function referenciaDePublicacion(elemento) {
     const contenedor = elemento.closest('article') || elemento.closest('main') || document;
     try {
-      const enlace = contenedor.querySelector('a[href*="/p/"], a[href*="/reel/"], a[href*="/tv/"]');
-      if (enlace) {
-        const m = enlace.getAttribute('href').match(/\/(?:p|reel|tv)\/([A-Za-z0-9_-]{5,})/);
-        if (m) return m[1];
+      const enlaces = contenedor.querySelectorAll('a[href*="/p/"], a[href*="/reel/"], a[href*="/tv/"]');
+      for (const enlace of enlaces) {
+        const m = String(enlace.getAttribute('href') || '').match(/\/(p|reel|tv)\/([A-Za-z0-9_-]{5,})/);
+        if (m) return { tipo: m[1], code: m[2] };
       }
-      const propia = location.pathname.match(/\/(?:p|reel|tv)\/([A-Za-z0-9_-]{5,})/);
-      if (propia) return propia[1];
+      const propia = String(location.pathname || '').match(/\/(p|reel|tv)\/([A-Za-z0-9_-]{5,})/);
+      if (propia) return { tipo: propia[1], code: propia[2] };
     } catch (_) {
       /* sin contexto */
     }
-    return '';
+    return { tipo: 'p', code: '' };
+  }
+
+  /** Código corto (shortcode) de la publicación a la que pertenece un elemento. */
+  function codigoDePublicacion(elemento) {
+    return referenciaDePublicacion(elemento).code;
   }
 
   /** Usuario del autor, leído del enlace de perfil del artículo. */
@@ -96,11 +100,20 @@
   }
 
   function contexto(elemento) {
+    const referencia = referenciaDePublicacion(elemento);
     return {
-      code: codigoDePublicacion(elemento),
+      code: referencia.code,
+      tipo: referencia.tipo,
       usuario: usuarioDePublicacion(elemento),
       fecha: new Date().toISOString().slice(0, 10)
     };
+  }
+
+  function urlDePublicacion(elemento, ctx) {
+    const referencia = ctx && ctx.code ? ctx : referenciaDePublicacion(elemento);
+    if (!referencia.code) return '';
+    const tipo = referencia.tipo === 'reel' || referencia.tipo === 'tv' ? referencia.tipo : 'p';
+    return 'https://www.instagram.com/' + tipo + '/' + referencia.code + '/';
   }
 
   function sanear(texto) {
@@ -245,6 +258,34 @@
     elemento.__xvdBadge = badge;
   }
 
+  function asegurarBotonDeEnlace(info, dato) {
+    const cfg = core.getSettings();
+    const publicacion = info.contenedor || dato.elemento;
+    const existente = publicacion.__xvdInstagramLinkButton;
+    if (!cfg.copyLinkButton) {
+      if (existente) existente.remove();
+      return;
+    }
+    if (existente && existente.isConnected) return;
+
+    const ancla = (info.medios && info.medios[0]) || dato.elemento;
+    const host = anfitrion(ancla);
+    const boton = core.createButton({
+      label: 'Copiar enlace',
+      title: 'Copiar el enlace de la publicación de Instagram',
+      ariaLabel: 'Copiar enlace de la publicación',
+      icon: core.ICONS.link,
+      className: 'xvd-button--copy-link xvd-button--image' + (dentroDelVisor(ancla) ? ' xvd-button--br' : ''),
+      onClick: () => core.copyLinkToButton(boton, () => urlDePublicacion(dato.elemento, contexto(dato.elemento)))
+    });
+    boton.dataset.xvdKind = 'instagram-link';
+    boton.dataset.xvdSite = 'instagram';
+    boton.__xvdPublication = publicacion;
+    boton.__xvdHost = host;
+    host.appendChild(boton);
+    publicacion.__xvdInstagramLinkButton = boton;
+  }
+
   function limpiarOverlaysInstagram() {
     document
       .querySelectorAll('.' + core.BUTTON_CLASS + '[data-xvd-site="instagram"]')
@@ -266,16 +307,18 @@
 
     // Botones cuyo elemento ya no está en el documento.
     document.querySelectorAll('.' + core.BUTTON_CLASS + '[data-xvd-site="instagram"]').forEach((boton) => {
-      const objetivo = boton.__xvdElemento;
+      const objetivo = boton.__xvdElemento || boton.__xvdPublication;
       if (!objetivo || !objetivo.isConnected || !boton.isConnected) boton.remove();
     });
 
     const medios = elementosDeMedio();
     let conBoton = 0;
+    const publicaciones = new Map();
 
     for (const dato of medios) {
       try {
         const info = totalEnPublicacion(dato.elemento);
+        publicaciones.set(info.contenedor || dato.elemento, { info, dato });
         const existente = dato.elemento.__xvdInstagramButton;
         if (existente && existente.isConnected) {
           pintarContador(dato.elemento, existente.__xvdHost || dato.elemento.parentElement, info);
@@ -286,6 +329,14 @@
         conBoton++;
       } catch (_) {
         /* un medio problemático no debe romper el resto */
+      }
+    }
+
+    for (const { info, dato } of publicaciones.values()) {
+      try {
+        asegurarBotonDeEnlace(info, dato);
+      } catch (_) {
+        /* una publicación rara no debe afectar a las demás */
       }
     }
 
@@ -502,5 +553,16 @@
       if (!cfg.instagramEnabled) limpiarOverlaysInstagram();
     });
     log('info', 'instagram', 'Módulo de Instagram activo', { url: location.pathname });
+  }
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+      esUrlDeInstagram,
+      esImagenPublicable,
+      referenciaDePublicacion,
+      codigoDePublicacion,
+      urlDePublicacion,
+      nombreDeArchivo
+    };
   }
 })();

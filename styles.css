@@ -102,11 +102,39 @@
   height: 16px;
 }
 
+/* El enlace comparte overlay con «Descargar» y queda inmediatamente a su
+   izquierda. El desplazamiento deja sitio tanto al botón normal como al modo
+   compacto de imágenes. */
+.xvd-button--copy-link {
+  right: 132px;
+}
+
+.xvd-button--image.xvd-button--copy-link {
+  right: 126px;
+}
+
+.xvd-button--copy-link.xvd-button--gallery {
+  right: 174px;
+}
+
+.xvd-button--copy-link.xvd-button--bl {
+  left: 160px;
+  right: auto;
+}
+
+.xvd-button--pixabay.xvd-button--copy-link {
+  right: 126px;
+}
+
 /* En el visor ampliado se baja el botón para no tapar los controles de X. */
 .xvd-button--br {
   top: auto;
   bottom: 10px;
   right: 10px;
+}
+
+.xvd-button--copy-link.xvd-button--br {
+  right: 132px;
 }
 
 .xvd-button--compact {

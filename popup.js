@@ -16,6 +16,7 @@ const DEFAULT_SETTINGS = {
   askWhereToSave: false,
   showToasts: true,
   showOnHover: false,
+  copyLinkButton: true,
   /* --- Videos --- */
   format: 'auto',
   quality: 'max',
@@ -214,6 +215,7 @@ function readForm() {
     askWhereToSave: elements.askWhereToSave.checked,
     showToasts: elements.showToasts.checked,
     showOnHover: elements.showOnHover.checked,
+    copyLinkButton: elements.copyLinkButton.checked,
 
     format: radioValue('format') || DEFAULT_SETTINGS.format,
     quality: radioValue('quality') || DEFAULT_SETTINGS.quality,
@@ -260,6 +262,7 @@ function fillForm(settings) {
   elements.askWhereToSave.checked = !!settings.askWhereToSave;
   elements.showToasts.checked = !!settings.showToasts;
   elements.showOnHover.checked = !!settings.showOnHover;
+  elements.copyLinkButton.checked = !!settings.copyLinkButton;
 
   setRadio('format', settings.format);
   setRadio('quality', settings.quality);
@@ -611,6 +614,7 @@ async function init() {
   elements.imageFilenameTemplate = $('imageFilenameTemplate');
   elements.showToasts = $('showToasts');
   elements.showOnHover = $('showOnHover');
+  elements.copyLinkButton = $('copyLinkButton');
   elements.saveStatus = $('saveStatus');
   elements.tabStatus = $('tabStatus');
   elements.generalStatus = $('generalStatus');

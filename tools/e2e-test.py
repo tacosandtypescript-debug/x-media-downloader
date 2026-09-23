@@ -463,6 +463,8 @@ with sync_playwright() as p:
             "--no-default-browser-check",
         ],
     )
+    for origen in ("https://x.com", "https://www.instagram.com", "https://www.facebook.com"):
+        ctx.grant_permissions(["clipboard-read", "clipboard-write"], origin=origen)
 
     # --- rutas falsas -------------------------------------------------------
     def ruta_video(route):
@@ -499,15 +501,23 @@ with sync_playwright() as p:
 
     # ================================================== 1. INYECCIÓN DE BOTONES
     print("1. INYECCIÓN DE BOTONES")
-    SEL_VIDEO = "button.xvd-button:not(.xvd-button--image):not(.xvd-button--gallery)"
+    SEL_VIDEO = "button.xvd-button:not(.xvd-button--image):not(.xvd-button--gallery):not(.xvd-button--copy-link)"
     total = page.locator("button.xvd-button").count()
-    check("se inyecta un botón por medio (1 vídeo + 4 imágenes + 1 galería = 6)", total == 6, f"{total} botones")
+    check("se inyectan descargas y enlaces (1 vídeo + 4 imágenes + 1 galería + 2 enlaces = 8)", total == 8, f"{total} botones")
     boton_video = page.locator(SEL_VIDEO).first
     check("botón del vídeo con texto «Descargar»",
           boton_video.count() == 1 and boton_video.inner_text().strip().startswith("Descargar"),
           boton_video.inner_text().strip() if boton_video.count() else "no encontrado")
     check("4 botones sobre las imágenes", page.locator("button.xvd-button--image").count() == 4)
-    check("botón «Descargar todas (4)» en la galería", "Descargar todas (4)" in page.locator("button.xvd-button--gallery").first.inner_text())
+    check("botón «Descargar todas (4)» en la galería", "Descargar todas (4)" in page.locator("button[data-xvd-kind='gallery']").first.inner_text())
+    enlaces = page.locator("button[data-xvd-kind='video-link'], button[data-xvd-kind='image-link']")
+    check("hay un enlace para el vídeo y uno para la galería", enlaces.count() == 2, f"{enlaces.count()} enlaces")
+    check("la galería no repite el enlace por cada foto", page.locator("button[data-xvd-kind='image-link']").count() == 1)
+    enlaces.first.click()
+    esperar(page, 0.4)
+    enlace_copiado = page.evaluate("() => navigator.clipboard.readText()")
+    check("el enlace de X copiado es el de la publicación completa",
+          enlace_copiado == f"https://x.com/axichuhai/status/{TWEET_ID}", enlace_copiado)
     badges = page.locator(".xvd-badge").all_inner_texts()
     check("contadores de galería 1/4 … 4/4", badges == ["1/4", "2/4", "3/4", "4/4"], badges)
     check("la extensión está viva (service worker activo)", ext_id != "?", f"id {ext_id}")
@@ -584,10 +594,10 @@ with sync_playwright() as p:
     volcar_diagnostico(popup, "DIAGNÓSTICO TRAS LA IMAGEN 1", sw)
 
     page.reload(wait_until="domcontentloaded")
-    page.wait_for_selector("button.xvd-button--gallery", timeout=20000)
+    page.wait_for_selector("button[data-xvd-kind='gallery']", timeout=20000)
     esperar(page, 1.5)
     peticiones["probe"].clear()
-    page.locator("button.xvd-button--gallery").first.click()
+    page.locator("button[data-xvd-kind='gallery']").first.click()
     esperar(page, 6.0)
 
     lote = [e for e in leer_registro(popup) if "lote terminado" in str(e.get("msg", ""))]
@@ -711,14 +721,23 @@ with sync_playwright() as p:
     esperar(ig, 1.5)
 
     botones_ig = ig.locator("button.xvd-button[data-xvd-site='instagram']")
-    check("se inyectan botones en Instagram (1 reel + 3 del carrusel)", botones_ig.count() == 4, f"{botones_ig.count()} botones")
+    descargas_ig_ui = ig.locator("button.xvd-button[data-xvd-kind='instagram']")
+    enlaces_ig = ig.locator("button.xvd-button[data-xvd-kind='instagram-link']")
+    check("se inyectan 4 descargas y un enlace por publicación en Instagram",
+          botones_ig.count() == 6 and descargas_ig_ui.count() == 4 and enlaces_ig.count() == 2,
+          f"{botones_ig.count()} botones, {enlaces_ig.count()} enlaces")
+    enlaces_ig.first.click()
+    esperar(ig, 0.4)
+    check("el enlace de Instagram apunta al reel completo",
+          ig.evaluate("() => navigator.clipboard.readText()") == "https://www.instagram.com/reel/DdXUcJaSe8X/",
+          ig.evaluate("() => navigator.clipboard.readText()"))
 
     insignias = ig.locator(".xvd-badge").all_inner_texts()
     check("el carrusel muestra su contador 1/3 … 3/3", insignias == ["1/3", "2/3", "3/3"], insignias)
 
     # --- reel: la mejor versión del vídeo (1080x1920, no la de 720) ---------
     ids_antes_ig = {d.get("id") for d in descargas_de(popup, "")}
-    botones_ig.first.click()
+    descargas_ig_ui.first.click()
     esperar(ig, 6.0)
 
     registro_ig = leer_registro(popup)
@@ -739,7 +758,7 @@ with sync_playwright() as p:
 
     # --- carrusel: el segundo elemento conserva su URL firmada --------------
     ids_antes_ig = {d.get("id") for d in descargas_de(popup, "")}
-    botones_ig.nth(2).click()
+    descargas_ig_ui.nth(2).click()
     esperar(ig, 6.0)
 
     descargas_carrusel = [d for d in descargas_de(popup, "fbcdn") if d.get("id") not in ids_antes_ig]
@@ -760,7 +779,7 @@ with sync_playwright() as p:
     esperar(ig, 1.5)
 
     ids_antes_mp3 = {d.get("id") for d in descargas_de(popup, "")}
-    ig.locator("button.xvd-button[data-xvd-site='instagram']").first.click()
+    ig.locator("button.xvd-button[data-xvd-kind='instagram']").first.click()
 
     mp3_ig = None
     limite = time.time() + 120
@@ -825,11 +844,20 @@ with sync_playwright() as p:
     esperar(fb, 1.5)
 
     botones_fb = fb.locator("button.xvd-button[data-xvd-site='facebook']")
-    check("se inyectan botones en Facebook (1 vídeo + 1 foto)", botones_fb.count() == 2, f"{botones_fb.count()} botones")
+    descargas_fb_ui = fb.locator("button.xvd-button[data-xvd-kind='facebook']")
+    enlaces_fb = fb.locator("button.xvd-button[data-xvd-kind='facebook-link']")
+    check("se inyectan 2 descargas y un enlace por publicación en Facebook",
+          botones_fb.count() == 4 and descargas_fb_ui.count() == 2 and enlaces_fb.count() == 2,
+          f"{botones_fb.count()} botones, {enlaces_fb.count()} enlaces")
+    enlaces_fb.first.click()
+    esperar(fb, 0.4)
+    check("el enlace de Facebook apunta al vídeo completo",
+          fb.evaluate("() => navigator.clipboard.readText()") == "https://www.facebook.com/reel/1906283450061603/",
+          fb.evaluate("() => navigator.clipboard.readText()"))
 
     # --- vídeo: se elige la pista HD (no la SD ni los trozos) ---------------
     ids_antes_fb = {d.get("id") for d in descargas_de(popup, "")}
-    botones_fb.first.click()
+    descargas_fb_ui.first.click()
     esperar(fb, 6.0)
 
     registro_fb = leer_registro(popup)
@@ -848,7 +876,7 @@ with sync_playwright() as p:
 
     # --- foto: tamaño completo de fbcdn ------------------------------------
     ids_antes_foto = {d.get("id") for d in descargas_de(popup, "")}
-    botones_fb.nth(1).click()
+    descargas_fb_ui.nth(1).click()
     esperar(fb, 6.0)
     urls_foto = [d.get("url", "") for d in descargas_de(popup, "foto-grande") if d.get("id") not in ids_antes_foto]
     check("la foto se descarga a tamaño completo y con su firma",
@@ -861,7 +889,7 @@ with sync_playwright() as p:
     esperar(fb, 1.5)
 
     ids_antes_m4a = {d.get("id") for d in descargas_de(popup, "")}
-    fb.locator("button.xvd-button[data-xvd-site='facebook']").first.click()
+    fb.locator("button.xvd-button[data-xvd-kind='facebook']").first.click()
     esperar(fb, 6.0)
 
     m4a_fb = None
@@ -882,7 +910,7 @@ with sync_playwright() as p:
     esperar(fb, 1.5)
 
     ids_antes_mp3fb = {d.get("id") for d in descargas_de(popup, "")}
-    fb.locator("button.xvd-button[data-xvd-site='facebook']").first.click()
+    fb.locator("button.xvd-button[data-xvd-kind='facebook']").first.click()
 
     mp3_fb = None
     limite = time.time() + 120
@@ -913,7 +941,7 @@ with sync_playwright() as p:
     esperar(fb, 1.5)
 
     ids_antes_og = {d.get("id") for d in descargas_de(popup, "")}
-    fb.locator("button.xvd-button[data-xvd-site='facebook']").first.click()
+    fb.locator("button.xvd-button[data-xvd-kind='facebook']").first.click()
     esperar(fb, 6.0)
 
     urls_og = [d.get("url", "") for d in descargas_de(popup, "SD.mp4") if d.get("id") not in ids_antes_og]

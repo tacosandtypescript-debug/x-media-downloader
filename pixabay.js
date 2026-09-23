@@ -377,14 +377,61 @@
     );
   }
 
+  /** URL de la ficha de Pixabay asociada al medio, no la del CDN. */
+  function urlDePublicacion(medio) {
+    const raw = medio && medio.href ? String(medio.href) : '';
+    try {
+      const url = new URL(raw || location.href, location.origin || 'https://pixabay.com');
+      const host = url.hostname.toLowerCase();
+      if (host !== 'pixabay.com' && !host.endsWith('.pixabay.com')) return '';
+      url.hash = '';
+      return url.toString();
+    } catch (_) {
+      return '';
+    }
+  }
+
   function limpiarOverlaysPixabay() {
     document.querySelectorAll('.' + core.BUTTON_CLASS + '[data-xvd-site="pixabay"]').forEach((n) => n.remove());
     document.querySelectorAll('[' + MARCA + ']').forEach((n) => n.removeAttribute(MARCA));
   }
 
+  function asegurarBotonDeEnlace(medio, host, enLinea) {
+    const existente = host.__xvdPixabayLinkButton;
+    if (!core.getSettings().copyLinkButton) {
+      if (existente) existente.remove();
+      return;
+    }
+    if (existente && existente.isConnected) return;
+
+    const boton = core.createButton({
+      label: 'Copiar enlace',
+      title: 'Copiar el enlace de la ficha de Pixabay',
+      ariaLabel: 'Copiar enlace de la ficha',
+      icon: core.ICONS.link,
+      className: 'xvd-button--copy-link xvd-button--pixabay' + (enLinea ? ' xvd-button--en-linea' : ''),
+      onClick: () => core.copyLinkToButton(boton, () => urlDePublicacion(medio))
+    });
+    boton.dataset.xvdKind = 'pixabay-link';
+    boton.dataset.xvdSite = 'pixabay';
+    boton.__xvdMedium = medio;
+    host.appendChild(boton);
+    host.__xvdPixabayLinkButton = boton;
+  }
+
   function crearBoton(medio, host, enLinea, antesDe) {
     if (!host) return false;
     const etiqueta = medio.tipo === 'photo' ? 'Descargar la imagen' : medio.tipo === 'video' ? 'Descargar el vídeo' : 'Descargar el audio';
+
+    let destino = host;
+    if (!enLinea) {
+      destino = core.findOverlayHost(host);
+      if (!destino) {
+        host.style.position = 'relative';
+        destino = host;
+      }
+      destino.setAttribute(core.HOST_ATTR, '1');
+    }
 
     const boton = core.createButton({
       label: medio.tipo === 'photo' ? 'Imagen' : medio.tipo === 'video' ? 'Vídeo' : 'Audio',
@@ -402,16 +449,12 @@
       if (antesDe && antesDe.parentElement === host) host.insertBefore(boton, antesDe);
       else host.appendChild(boton);
     } else {
-      let caja = core.findOverlayHost(host);
-      if (!caja) {
-        host.style.position = 'relative';
-        caja = host;
-      }
-      caja.setAttribute(core.HOST_ATTR, '1');
-      caja.appendChild(boton);
+      destino.appendChild(boton);
     }
 
-    host.setAttribute(MARCA, medio.id);
+    destino.__xvdPixabayEnLinea = !!enLinea;
+    destino.setAttribute(MARCA, medio.id);
+    asegurarBotonDeEnlace(medio, destino, enLinea);
     return true;
   }
 
@@ -421,7 +464,10 @@
       const botonWeb = botonDeDescargaDeLaWeb();
       if (botonWeb && botonWeb.parentElement) {
         const contenedor = botonWeb.parentElement;
-        if (contenedor.getAttribute(MARCA)) return false;
+        if (contenedor.getAttribute(MARCA)) {
+          asegurarBotonDeEnlace(medio, contenedor, true);
+          return false;
+        }
         contenedor.setAttribute(MARCA, 'encurso');
         return crearBoton(medio, contenedor, true, botonWeb);
       }
@@ -432,7 +478,10 @@
         document.querySelector('video');
       if (principal && principal.parentElement) {
         const caja = principal.parentElement;
-        if (caja.getAttribute(MARCA)) return false;
+        if (caja.getAttribute(MARCA)) {
+          asegurarBotonDeEnlace(medio, caja, false);
+          return false;
+        }
         caja.setAttribute(MARCA, 'encurso');
         return crearBoton(medio, caja, false);
       }
@@ -450,7 +499,10 @@
       const rectFila = fila.getBoundingClientRect();
       if (rectFila.width < 200 || rectFila.height < 32) return false;
       const acciones = fila.querySelector('[class*="rightSection"]') || fila;
-      if (acciones.getAttribute(MARCA)) return false;
+      if (acciones.getAttribute(MARCA)) {
+        asegurarBotonDeEnlace(medio, acciones, true);
+        return false;
+      }
       acciones.setAttribute(MARCA, 'encurso');
       return crearBoton(medio, acciones, true, null);
     }
@@ -460,7 +512,10 @@
     if (rect.width < 60 || rect.height < 40) return false;
 
     const caja = ancla.querySelector('[class*="overlayContainer"]') || ancla;
-    if (caja.getAttribute(MARCA)) return false;
+    if (caja.getAttribute(MARCA)) {
+      asegurarBotonDeEnlace(medio, caja, false);
+      return false;
+    }
     caja.setAttribute(MARCA, 'encurso');
     return crearBoton(medio, caja, false);
   }
@@ -555,6 +610,7 @@
       planDeVideo,
       planDeAudio,
       nombreDeArchivo,
+      urlDePublicacion,
       esLaFichaDe,
       VIDEO_TAMANOS,
       FOTO_TAMANOS

@@ -45,9 +45,9 @@
    */
   const coreVersion = (() => {
     try {
-      return chrome.runtime.getManifest().version || '2.8.0';
+      return chrome.runtime.getManifest().version || '2.8.1';
     } catch (_) {
-      return '2.8.0';
+      return '2.8.1';
     }
   })();
 
@@ -58,6 +58,7 @@
     askWhereToSave: false,         // mostrar diálogo "Guardar como"
     showToasts: true,              // avisos flotantes en la página
     showOnHover: false,            // mostrar los botones solo al pasar el ratón
+    copyLinkButton: true,          // mostrar el botón "Copiar enlace"
     /* --- Videos --- */
     format: 'auto',                // auto | mp4 | webm | m4a
     quality: 'max',                // max | custom
@@ -96,6 +97,12 @@
     '<svg class="xvd-button__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
     '<path d="M12 3a1 1 0 0 1 1 1v8.59l2.3-2.3a1 1 0 1 1 1.4 1.42l-4 4a1 1 0 0 1-1.4 0l-4-4a1 1 0 0 1 1.4-1.42l2.3 2.3V4a1 1 0 0 1 1-1Z"/>' +
     '<path d="M4 15a1 1 0 0 1 1 1v2a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2a1 1 0 1 1 2 0v2a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3v-2a1 1 0 0 1 1-1Z"/>' +
+    '</svg>';
+
+  const LINK_SVG =
+    '<svg class="xvd-button__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
+    '<path d="M9.2 14.8a1 1 0 0 1 0-1.4l4.2-4.2a3.8 3.8 0 0 1 5.4 5.4l-2.1 2.1a3.8 3.8 0 0 1-5.4 0 1 1 0 1 1 1.4-1.4 1.8 1.8 0 0 0 2.6 0l2.1-2.1a1.8 1.8 0 0 0-2.6-2.6l-4.2 4.2a1 1 0 0 1-1.4 0Z"/>' +
+    '<path d="M14.8 9.2a1 1 0 0 1 0 1.4l-4.2 4.2a3.8 3.8 0 0 1-5.4-5.4l2.1-2.1a3.8 3.8 0 0 1 5.4 0 1 1 0 1 1-1.4 1.4 1.8 1.8 0 0 0-2.6 0L6.6 10.8a1.8 1.8 0 0 0 2.6 2.6l4.2-4.2a1 1 0 0 1 1.4 0Z"/>' +
     '</svg>';
 
   const SPINNER_SVG =
@@ -169,6 +176,49 @@
 
   function sleep(ms) {
     return new Promise((r) => setTimeout(r, ms));
+  }
+
+  /** Copia un enlace sin exponer el CDN: Clipboard API y respaldo legacy. */
+  async function copyLink(url) {
+    const value = String(url || '').trim();
+    if (!/^https?:\/\//i.test(value)) throw new Error('El enlace de la publicación no es válido.');
+
+    let clipboardError = null;
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        await navigator.clipboard.writeText(value);
+        return value;
+      }
+    } catch (err) {
+      clipboardError = err;
+    }
+
+    let textarea = null;
+    try {
+      if (typeof document === 'undefined' || typeof document.createElement !== 'function' || typeof document.execCommand !== 'function') {
+        throw clipboardError || new Error('La API del portapapeles no está disponible.');
+      }
+      textarea = document.createElement('textarea');
+      textarea.value = value;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.left = '-9999px';
+      textarea.style.top = '0';
+      const parent = document.body || document.documentElement;
+      if (!parent || typeof parent.appendChild !== 'function') throw new Error('No se pudo preparar el portapapeles.');
+      parent.appendChild(textarea);
+      if (typeof textarea.select === 'function') textarea.select();
+      if (typeof textarea.setSelectionRange === 'function') textarea.setSelectionRange(0, value.length);
+      if (document.execCommand('copy')) return value;
+    } catch (err) {
+      clipboardError = err;
+    } finally {
+      if (textarea && typeof textarea.remove === 'function') textarea.remove();
+      else if (textarea && textarea.parentNode && typeof textarea.parentNode.removeChild === 'function') {
+        textarea.parentNode.removeChild(textarea);
+      }
+    }
+    throw clipboardError || new Error('No se pudo copiar el enlace.');
   }
 
   /** Texto seguro para el usuario a partir de cualquier error. */
@@ -1298,14 +1348,14 @@
         const m = userLink.getAttribute('href').match(/^\/([A-Za-z0-9_]{1,20})$/);
         if (m) context.screenName = m[1];
       }
-      if (!context.screenName) {
-        const statusLink = scope.querySelector('a[href*="/status/"]');
-        if (statusLink) {
-          const m = statusLink.getAttribute('href').match(/^\/([A-Za-z0-9_]{1,20})\/status\/(\d+)/);
-          if (m) {
-            context.screenName = m[1];
-            context.tweetId = m[2];
-          }
+      const statusLink = scope.querySelector('a[href*="/status/"]');
+      if (statusLink) {
+        const m = String(statusLink.getAttribute('href') || '').match(
+          /^(?:https?:\/\/(?:www\.)?(?:x|twitter)\.com)?\/([A-Za-z0-9_]{1,20})\/status\/(\d+)/i
+        );
+        if (m) {
+          if (!context.screenName) context.screenName = m[1];
+          if (!context.tweetId) context.tweetId = m[2];
         }
       }
       if (!context.tweetId) {
@@ -1319,6 +1369,14 @@
       /* contexto opcional */
     }
     return context;
+  }
+
+  /** URL canónica de una publicación de X, nunca la URL de pbs.twimg.com. */
+  function buildTweetUrl(context) {
+    const usuario = String((context && context.screenName) || '').trim();
+    const id = String((context && context.tweetId) || '').trim();
+    if (!/^[A-Za-z0-9_]{1,20}$/.test(usuario) || !/^\d+$/.test(id)) return '';
+    return 'https://x.com/' + usuario + '/status/' + id;
   }
 
   /**
@@ -1515,6 +1573,24 @@
     label.textContent = customLabel || idleLabel;
   }
 
+  /** Copia un enlace y comparte feedback visual/toast entre todos los módulos. */
+  async function copyLinkToButton(button, url) {
+    setButtonState(button, 'loading', 'Copiando…');
+    try {
+      await copyLink(typeof url === 'function' ? url() : url);
+      setButtonState(button, 'done', 'Copiado');
+      toast('Enlace copiado al portapapeles', 'success', 3500);
+      setTimeout(() => {
+        if (button && button.dataset.state === 'done') setButtonState(button, 'idle');
+      }, 1500);
+      return true;
+    } catch (_) {
+      setButtonState(button, 'error', 'Error');
+      toast('No se pudo copiar el enlace', 'error', 7000);
+      return false;
+    }
+  }
+
   function isTooSmall(video) {
     const rect = video.getBoundingClientRect();
     return rect.width < 120 || rect.height < 80;
@@ -1529,6 +1605,7 @@
       if (video.getAttribute(VIDEO_ATTR) !== mediaIdFromVideo(video)) {
         video.setAttribute(VIDEO_ATTR, mediaIdFromVideo(video));
       }
+      ensureVideoCopyButton(video, existing.__xvdHost || existing.parentElement);
       return;
     }
 
@@ -1565,9 +1642,34 @@
       onClick: (event) => handleDownloadClick(event, video, button)
     });
     video.__xvdButton = button;
+    button.__xvdHost = host;
     host.appendChild(button);
+    ensureVideoCopyButton(video, host);
     const id = mediaIdFromVideo(video);
     if (id) video.setAttribute(VIDEO_ATTR, id);
+  }
+
+  function ensureVideoCopyButton(video, host) {
+    const existing = video.__xvdLinkButton;
+    if (!settings.copyLinkButton) {
+      if (existing) existing.remove();
+      return;
+    }
+    if (existing && existing.isConnected && existing.parentElement) return;
+    if (!host) return;
+
+    const button = createButton({
+      label: 'Copiar enlace',
+      title: 'Copiar el enlace de la publicación de X',
+      ariaLabel: 'Copiar enlace de la publicación',
+      icon: LINK_SVG,
+      className: 'xvd-button--copy-link',
+      onClick: () => copyLinkToButton(button, () => buildTweetUrl(getTweetContext(video)))
+    });
+    button.dataset.xvdKind = 'video-link';
+    button.__xvdHost = host;
+    host.appendChild(button);
+    video.__xvdLinkButton = button;
   }
 
   /** Escaneo del módulo de video: se registra en el núcleo compartido. */
@@ -2328,6 +2430,7 @@
     IMAGE_ATTR,
     ICONS: {
       download: ICON_SVG,
+      link: LINK_SVG,
       spinner: SPINNER_SVG,
       check: CHECK_SVG,
       warn: WARN_SVG,
@@ -2346,6 +2449,9 @@
     setButtonState,
     findOverlayHost,
     getTweetContext,
+    buildTweetUrl,
+    copyLink,
+    copyLinkToButton,
     sanitizeFolder,
     cleanupOverlays,
     isOurNode,
@@ -2452,6 +2558,8 @@
       variantScore,
       bitrateDeAudio,
       buildFilename,
+      buildTweetUrl,
+      copyLink,
       sanitizeFolder,
       parseMasterPlaylist,
       parseMediaPlaylist,

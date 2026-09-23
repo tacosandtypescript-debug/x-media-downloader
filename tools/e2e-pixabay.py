@@ -273,6 +273,7 @@ with sync_playwright() as p:
             "--no-default-browser-check",
         ],
     )
+    ctx.grant_permissions(["clipboard-read", "clipboard-write"], origin="https://pixabay.com")
 
     ctx.route(
         "https://pixabay.com/**",
@@ -331,16 +332,23 @@ with sync_playwright() as p:
     # --------------------------------------------------- 1. botones colocados
     print("1. BOTONES EN LA PÁGINA")
     botones = page.locator("button.xvd-button[data-xvd-site='pixabay']")
-    check("se colocan los botones de los tres medios", botones.count() == 3, f"{botones.count()} botones")
+    descargas = page.locator("button.xvd-button[data-xvd-kind='pixabay']")
+    enlaces = page.locator("button.xvd-button[data-xvd-kind='pixabay-link']")
+    check("se colocan las descargas y un enlace por cada medio", botones.count() == 6 and descargas.count() == 3 and enlaces.count() == 3, f"{botones.count()} botones, {enlaces.count()} enlaces")
     ids = page.evaluate(
-        """() => [...document.querySelectorAll("button.xvd-button[data-xvd-site='pixabay']")].map(b => b.dataset.xvdId)"""
+        """() => [...document.querySelectorAll("button.xvd-button[data-xvd-kind='pixabay']")].map(b => b.dataset.xvdId)"""
     )
     check("cada botón lleva el id de su medio", sorted(ids) == ["348656", "551346", "7572681"], ids)
     en_linea = page.evaluate(
-        """() => { const b = document.querySelector("button.xvd-button[data-xvd-id='551346']");
+        """() => { const b = document.querySelector("button.xvd-button[data-xvd-id='551346'][data-xvd-kind='pixabay']");
                    return b ? b.className : ''; }"""
     )
     check("el botón de la fila de música va en línea (no flotante)", "xvd-button--en-linea" in en_linea, en_linea)
+    enlaces.first.click()
+    esperar(page, 0.4)
+    check("el enlace de Pixabay apunta a la ficha del recurso",
+          page.evaluate("() => navigator.clipboard.readText()") == "https://pixabay.com/photos/bachalpsee-lake-mountains-7572681/",
+          page.evaluate("() => navigator.clipboard.readText()"))
     page.screenshot(path=str(SHOTS / "pixabay-listado.png"))
 
     # La carpeta y la calidad que se probarán.
@@ -371,7 +379,7 @@ with sync_playwright() as p:
 
     # ------------------------------------------------------------ 2. la foto
     print("\n2. FOTO (cae a 1280 porque 1920 responde 403)")
-    page.locator("button.xvd-button[data-xvd-id='7572681']").click()
+    page.locator("button.xvd-button[data-xvd-id='7572681'][data-xvd-kind='pixabay']").click()
     foto, entrada_foto = descarga_de('"tipo":"photo"')
     check("la foto se descarga", bool(foto and foto.exists()), foto)
     if foto and foto.exists():
@@ -390,7 +398,7 @@ with sync_playwright() as p:
 
     # ----------------------------------------------------------- 3. el vídeo
     print("\n3. VÍDEO (calidad mínima 720p → _tiny)")
-    page.locator("button.xvd-button[data-xvd-id='348656']").click()
+    page.locator("button.xvd-button[data-xvd-id='348656'][data-xvd-kind='pixabay']").click()
     video, entrada_video = descarga_de('"tipo":"video"')
     check("el vídeo se descarga", bool(video and video.exists()), video)
     if video and video.exists():
@@ -404,7 +412,7 @@ with sync_playwright() as p:
 
     # ----------------------------------------------------------- 4. el audio
     print("\n4. AUDIO (MP3 original del CDN)")
-    page.locator("button.xvd-button[data-xvd-id='551346']").click()
+    page.locator("button.xvd-button[data-xvd-id='551346'][data-xvd-kind='pixabay']").click()
     audio, entrada_audio = descarga_de('"tipo":"audio"')
     check("el audio se descarga", bool(audio and audio.exists()), audio)
     if audio and audio.exists():

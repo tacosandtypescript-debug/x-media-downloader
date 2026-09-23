@@ -101,10 +101,56 @@
     return '';
   }
 
+  function normalizarUrlDePublicacion(raw) {
+    if (!raw) return '';
+    try {
+      const url = new URL(raw, location.origin || 'https://www.facebook.com');
+      if (!/(^|\.)facebook\.com$/i.test(url.hostname) && !/(^|\.)fb\.watch$/i.test(url.hostname)) return '';
+      if (
+        !/\/(reel|videos|posts|permalink\.php|photo\.php|watch)(?:\/|$)/i.test(url.pathname) &&
+        !url.searchParams.has('v')
+      ) {
+        return '';
+      }
+      url.hash = '';
+      return url.toString();
+    } catch (_) {
+      return '';
+    }
+  }
+
+  /** Devuelve la URL de la publicación, nunca la del CDN del archivo. */
+  function urlDePublicacion(elemento, ctx) {
+    const candidatos = [];
+    if (ctx && ctx.url) candidatos.push(ctx.url);
+    try {
+      const contenedor = elemento && elemento.closest('[role="article"], article, main');
+      if (contenedor) {
+        for (const a of contenedor.querySelectorAll('a[href*="/reel/"], a[href*="/videos/"], a[href*="/posts/"], a[href*="/watch"], a[href*="/photo"], a[href*="v="]')) {
+          candidatos.push(a.getAttribute('href'));
+        }
+      }
+      const og = document.querySelector('meta[property="og:url"]');
+      if (og) candidatos.push(og.getAttribute('content'));
+      const actual = location.href || (location.origin || 'https://www.facebook.com') + location.pathname;
+      candidatos.push(actual);
+    } catch (_) {
+      /* sin contexto */
+    }
+    for (const candidato of candidatos) {
+      const url = normalizarUrlDePublicacion(candidato);
+      if (url) return url;
+    }
+    const id = String((ctx && ctx.id) || (elemento && idDeVideo(elemento)) || '').trim();
+    return /^\d{6,}$/.test(id) ? 'https://www.facebook.com/reel/' + id + '/' : '';
+  }
+
   function contexto(elemento) {
+    const id = idDeVideo(elemento);
     return {
-      id: idDeVideo(elemento),
+      id,
       usuario: usuarioDePublicacion(elemento),
+      url: urlDePublicacion(elemento, { id }),
       fecha: new Date().toISOString().slice(0, 10)
     };
   }
@@ -372,6 +418,34 @@
     elemento.__xvdBadge = badge;
   }
 
+  function asegurarBotonDeEnlace(info, dato) {
+    const cfg = core.getSettings();
+    const publicacion = info.contenedor || dato.elemento;
+    const existente = publicacion.__xvdFacebookLinkButton;
+    if (!cfg.copyLinkButton) {
+      if (existente) existente.remove();
+      return;
+    }
+    if (existente && existente.isConnected) return;
+
+    const ancla = (info.contenedor && dato.elemento) || dato.elemento;
+    const host = anfitrion(ancla);
+    const boton = core.createButton({
+      label: 'Copiar enlace',
+      title: 'Copiar el enlace de la publicación de Facebook',
+      ariaLabel: 'Copiar enlace de la publicación',
+      icon: core.ICONS.link,
+      className: 'xvd-button--copy-link xvd-button--image' + (dentroDelVisor(ancla) ? ' xvd-button--br' : ''),
+      onClick: () => core.copyLinkToButton(boton, () => urlDePublicacion(dato.elemento, contexto(dato.elemento)))
+    });
+    boton.dataset.xvdKind = 'facebook-link';
+    boton.dataset.xvdSite = 'facebook';
+    boton.__xvdPublication = publicacion;
+    boton.__xvdHost = host;
+    host.appendChild(boton);
+    publicacion.__xvdFacebookLinkButton = boton;
+  }
+
   function crearBoton(dato, info) {
     const { elemento, clase } = dato;
     const host = anfitrion(elemento);
@@ -408,16 +482,18 @@
     }
 
     document.querySelectorAll('.' + core.BUTTON_CLASS + '[data-xvd-site="facebook"]').forEach((boton) => {
-      const objetivo = boton.__xvdElemento;
+      const objetivo = boton.__xvdElemento || boton.__xvdPublication;
       if (!objetivo || !objetivo.isConnected || !boton.isConnected) boton.remove();
     });
 
     const medios = elementosDeMedio();
     let conBoton = 0;
+    const publicaciones = new Map();
 
     for (const dato of medios) {
       try {
         const info = totalEnPublicacion(dato.elemento);
+        publicaciones.set(info.contenedor || dato.elemento, { info, dato });
         const existente = dato.elemento.__xvdFacebookButton;
         if (existente && existente.isConnected) {
           pintarContador(dato.elemento, existente.__xvdHost || dato.elemento.parentElement, info);
@@ -428,6 +504,14 @@
         conBoton++;
       } catch (_) {
         /* un medio problemático no debe romper el resto */
+      }
+    }
+
+    for (const { info, dato } of publicaciones.values()) {
+      try {
+        asegurarBotonDeEnlace(info, dato);
+      } catch (_) {
+        /* una publicación rara no debe afectar a las demás */
       }
     }
 
@@ -712,5 +796,15 @@
       if (!cfg.facebookEnabled) limpiarOverlaysFacebook();
     });
     log('info', 'facebook', 'Módulo de Facebook activo', { url: location.pathname });
+  }
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+      esUrlDeFacebook,
+      idDeVideo,
+      normalizarUrlDePublicacion,
+      urlDePublicacion,
+      contexto
+    };
   }
 })();

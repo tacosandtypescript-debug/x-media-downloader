@@ -436,6 +436,41 @@
     return button;
   }
 
+  /**
+   * Pinta un único botón de enlace por publicación. En una galería el contenedor
+   * común es la clave, de modo que no se duplica sobre cada foto individual.
+   */
+  function ensurePublicationLink(element, gallery) {
+    const cfg = core.getSettings();
+    const publication = (gallery && gallery.container) || element;
+    const existing = publication.__xvdImageLinkButton;
+    if (!cfg.copyLinkButton) {
+      if (existing) existing.remove();
+      return;
+    }
+    if (existing && existing.isConnected) return;
+
+    const anchor = gallery && gallery.total >= 2 ? publication : element;
+    const host = ensureHost(anchor);
+    const button = core.createButton({
+      label: 'Copiar enlace',
+      title: 'Copiar el enlace de la publicación de X',
+      ariaLabel: 'Copiar enlace de la publicación',
+      icon: core.ICONS.link,
+      className:
+        'xvd-button--copy-link ' +
+        (gallery && gallery.total >= 2 ? 'xvd-button--gallery' : 'xvd-button--image') +
+        (isInLightbox(anchor) ? ' xvd-button--br' : ''),
+      onClick: () =>
+        core.copyLinkToButton(button, () => core.buildTweetUrl(core.getTweetContext(element)))
+    });
+    button.dataset.xvdKind = 'image-link';
+    button.__xvdPublication = publication;
+    button.__xvdHost = host;
+    host.appendChild(button);
+    publication.__xvdImageLinkButton = button;
+  }
+
   function updateBadge(element, host, gallery) {
     const existing = element.__xvdBadge;
     if (!gallery || gallery.total < 2) {
@@ -496,7 +531,15 @@
 
   function cleanupImageOverlays() {
     document
-      .querySelectorAll('.' + BUTTON_CLASS + '[data-xvd-kind="image"], .' + BUTTON_CLASS + '[data-xvd-kind="gallery"]')
+      .querySelectorAll(
+        '.' +
+          BUTTON_CLASS +
+          '[data-xvd-kind="image"], .' +
+          BUTTON_CLASS +
+          '[data-xvd-kind="gallery"], .' +
+          BUTTON_CLASS +
+          '[data-xvd-kind="image-link"]'
+      )
       .forEach((node) => node.remove());
     document.querySelectorAll('.' + BADGE_CLASS).forEach((node) => node.remove());
     document.querySelectorAll('[' + IMAGE_ATTR + ']').forEach((node) => node.removeAttribute(IMAGE_ATTR));
@@ -536,6 +579,12 @@
         const target = button.__xvdGalleryContainer;
         if (!target || !target.isConnected || !button.isConnected) button.remove();
       });
+    document
+      .querySelectorAll('.' + BUTTON_CLASS + '[data-xvd-kind="image-link"]')
+      .forEach((button) => {
+        const target = button.__xvdPublication;
+        if (!target || !target.isConnected || !button.isConnected) button.remove();
+      });
 
     const candidates = new Map();
     document.querySelectorAll(IMAGE_SELECTOR).forEach((node) => {
@@ -544,6 +593,7 @@
     });
 
     const galleries = new Map();
+    const publications = new Map();
 
     for (const { element } of candidates.values()) {
       try {
@@ -553,6 +603,7 @@
         }
         const gallery = galleryInfo(element);
         ensureImageButton(element, gallery);
+        publications.set(gallery.container || element, { element, gallery });
         if (gallery.total >= 2) galleries.set(gallery.container, gallery);
       } catch (_) {
         /* una imagen problemática no debe romper el resto */
@@ -562,6 +613,14 @@
     for (const gallery of galleries.values()) {
       try {
         ensureGalleryButton(gallery);
+      } catch (_) {
+        /* idem */
+      }
+    }
+
+    for (const { element, gallery } of publications.values()) {
+      try {
+        ensurePublicationLink(element, gallery);
       } catch (_) {
         /* idem */
       }
